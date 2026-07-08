@@ -1,0 +1,40 @@
+[INPUT]
+prmtopfile = data/factorix/FactorIX.prmtop
+ambcrdfile = data/factorix/FactorIX.inpcrd
+rstfile    = data/factorix/rst
+
+[OUTPUT]
+
+[ENERGY]
+forcefield       = AMBER
+electrostatic    = PME
+switchdist       = 8
+cutoffdist       = 8
+pairlistdist     = 9.5
+pme_nspline      = 4
+nonbond_kernel   = GPU
+
+[DYNAMICS]
+integrator       = VVER
+iseed            = 314159
+nsteps           = 10000
+timestep         = 0.002
+eneout_period    = 1000
+nbupdate_period  = 20
+
+[CONSTRAINTS]
+rigid_bond       = YES
+water_model      = WAT
+
+[ENSEMBLE]
+ensemble         = NVE
+tpcontrol        = NO
+temperature      = 300
+group_tp         = YES
+
+[BOUNDARY]
+type             = PBC
+box_size_x       = 142.0855468
+box_size_y       = 83.3368905
+box_size_z       = 78.6783548
+

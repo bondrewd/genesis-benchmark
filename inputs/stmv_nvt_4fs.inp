@@ -1,0 +1,41 @@
+[INPUT]
+prmtopfile = data/stmv/prmtop
+ambcrdfile = data/stmv/inpcrd
+
+[OUTPUT]
+
+[ENERGY]
+forcefield       = AMBER
+electrostatic    = PME
+switchdist       = 8
+cutoffdist       = 8
+pairlistdist     = 9.5
+pme_nspline      = 4
+nonbond_kernel   = GPU
+
+[DYNAMICS]
+integrator       = VVER
+iseed            = 314159
+nsteps           = 10000
+timestep         = 0.004
+eneout_period    = 1000
+nbupdate_period  = 10
+thermostat_period = 10
+
+[CONSTRAINTS]
+rigid_bond       = YES
+water_model      = WAT
+hydrogen_mass_upper_bound = 3.3
+
+[ENSEMBLE]
+ensemble         = NVT
+tpcontrol        = BUSSI
+temperature      = 300
+group_tp         = YES
+
+[BOUNDARY]
+type             = PBC
+box_size_x       = 221.1723142
+box_size_y       = 223.1988809
+box_size_z       = 224.4925841
+

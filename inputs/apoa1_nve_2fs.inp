@@ -1,0 +1,48 @@
+[INPUT]
+topfile = data/apoa1/top_all27_prot_lipid.rtf
+parfile = data/apoa1/par_all27_prot_lipid.prm
+psffile = data/apoa1/apoa1.psf
+pdbfile = data/apoa1/apoa1.pdb
+rstfile = data/apoa1/apoa1.rst
+
+[OUTPUT]
+
+[ENERGY]
+forcefield       = CHARMM
+electrostatic    = PME
+switchdist       = 10.0
+cutoffdist       = 12.0
+pairlistdist     = 13.5
+pme_alpha        = 0.34
+pme_ngrid_x      = 80
+pme_ngrid_y      = 80
+pme_ngrid_z      = 64
+pme_nspline      = 4
+nonbond_kernel   = GPU
+
+[DYNAMICS]
+integrator       = VVER
+iseed            = 314159
+nsteps           = 10000
+timestep         = 0.002
+eneout_period    = 1000
+nbupdate_period  = 20
+
+[CONSTRAINTS]
+rigid_bond       = YES
+
+[ENSEMBLE]
+ensemble         = NVE
+tpcontrol        = NO
+temperature      = 300
+group_tp         = YES
+
+[BOUNDARY]
+type             = PBC
+box_size_x       = 107.4979
+box_size_y       = 107.4979
+box_size_z       = 76.7872
+domain_x         = 1
+domain_y         = 1
+domain_z         = 1
+

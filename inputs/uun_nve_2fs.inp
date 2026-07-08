@@ -1,0 +1,57 @@
+[INPUT]
+topfile = data/uun/toppar/top_all36_prot.rtf,\
+data/uun/toppar/top_all36_na.rtf,\
+data/uun/toppar/top_all36_lipid.rtf,\
+data/uun/toppar/top_all36_cgenff.rtf,\
+data/uun/toppar/top_all36_carb.rtf
+parfile = data/uun/toppar/par_all36_prot.prm,\
+data/uun/toppar/par_all36_na.prm,\
+data/uun/toppar/par_all36_carb.prm,\
+data/uun/toppar/par_all36_lipid.prm,\
+data/uun/toppar/par_all36_cgenff.prm
+strfile = data/uun/toppar/toppar_water_ions.genesis.str
+psffile = data/uun/uun.psf
+pdbfile = data/uun/uun.pdb
+rstfile = data/uun/uun.rst
+
+[OUTPUT]
+
+[ENERGY]
+forcefield       = CHARMM
+electrostatic    = PME
+switchdist       = 10
+cutoffdist       = 12
+pairlistdist     = 13.5
+pme_ngrid_x      = 128
+pme_ngrid_y      = 128
+pme_ngrid_z      = 128
+pme_nspline      = 4
+nonbond_kernel   = GPU
+water_model      = NONE
+
+[DYNAMICS]
+integrator       = VVER
+iseed            = 314159
+nsteps           = 10000
+timestep         = 0.002
+eneout_period    = 1000
+nbupdate_period  = 20
+
+[CONSTRAINTS]
+rigid_bond       = YES
+
+[ENSEMBLE]
+ensemble         = NVE
+tpcontrol        = NO
+temperature      = 300
+group_tp         = YES
+
+[BOUNDARY]
+type             = PBC
+box_size_x       = 126.5795
+box_size_y       = 126.5795
+box_size_z       = 130.6978
+domain_x         = 1
+domain_y         = 1
+domain_z         = 1
+

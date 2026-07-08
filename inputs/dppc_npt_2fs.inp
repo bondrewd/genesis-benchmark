@@ -1,0 +1,50 @@
+[INPUT]
+topfile          = data/dppc/top_all36_lipid.rtf
+parfile          = data/dppc/par_all36_lipid.prm
+strfile          = data/dppc/toppar_water_ions.str
+rstfile          = data/dppc/rst
+psffile          = data/dppc/dppc.psf
+pdbfile          = data/dppc/dppc.pdb
+
+[OUTPUT]
+
+[ENERGY]
+forcefield       = CHARMM
+electrostatic    = PME
+switchdist       = 10.0
+cutoffdist       = 12.0
+pairlistdist     = 13.5
+table_density    = 20.0
+pme_alpha        = 0.34
+pme_ngrid_x      = 72
+pme_ngrid_y      = 72
+pme_ngrid_z      = 72
+pme_nspline      = 4
+nonbond_kernel   = GPU
+
+[DYNAMICS]
+integrator       = VVER
+iseed            = 314159
+nsteps           = 10000
+timestep         = 0.002
+eneout_period    = 1000
+nbupdate_period  = 10
+thermostat_period = 10
+barostat_period  = 10
+
+[CONSTRAINTS]
+rigid_bond       = YES
+
+[ENSEMBLE]
+ensemble         = NPT
+tpcontrol        = BUSSI
+temperature      = 300
+pressure         = 1.0
+group_tp         = YES
+
+[BOUNDARY]
+type             = PBC
+domain_x         = 1
+domain_y         = 1
+domain_z         = 1
+

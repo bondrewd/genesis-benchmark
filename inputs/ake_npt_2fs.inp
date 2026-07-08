@@ -1,0 +1,50 @@
+[INPUT]
+prmtopfile       = data/ake/ake.top
+ambcrdfile       = data/ake/ake.rst
+ambreffile       = data/ake/ake.crd
+rstfile          = data/ake/restart.rst
+
+[OUTPUT]
+
+[ENERGY]
+forcefield       = AMBER
+electrostatic    = PME
+switchdist       = 10.0
+cutoffdist       = 10.0
+pairlistdist     = 12.0
+table_density    = 20.0
+pme_alpha        = 0.34
+pme_ngrid_x      = 72
+pme_ngrid_y      = 72
+pme_ngrid_z      = 72
+pme_nspline      = 4
+nonbond_kernel   = GPU
+water_model      = WAT
+
+[DYNAMICS]
+integrator       = VVER
+iseed            = 314159
+nsteps           = 10000
+timestep         = 0.002
+eneout_period    = 1000
+nbupdate_period  = 10
+thermostat_period = 10
+barostat_period  = 10
+
+[CONSTRAINTS]
+rigid_bond       = YES
+water_model      = WAT
+
+[ENSEMBLE]
+ensemble         = NPT
+tpcontrol        = BUSSI
+temperature      = 300
+pressure         = 1.0
+group_tp         = YES
+
+[BOUNDARY]
+type             = PBC
+domain_x         = 1
+domain_y         = 1
+domain_z         = 1
+
