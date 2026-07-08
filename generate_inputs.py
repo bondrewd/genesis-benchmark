@@ -13,14 +13,17 @@ dropping the barostat (NPT->NVT) and the thermostat (NVT->NVE).
 
 Ensemble policy (uniform across the matrix, so the 48 cells are comparable):
   NVE : tpcontrol = NO
-  NVT : tpcontrol = BUSSI, thermostat_period = 10
-  NPT : tpcontrol = BUSSI, thermostat_period = 10, barostat_period = 10, pressure = 1.0
+  NVT : tpcontrol = BUSSI, thermostat_period = 10 at 2fs and 5 at 4fs
+  NPT : tpcontrol = BUSSI, thermostat_period/barostat_period/baroscale_period
+        = 10 at 2fs and 5 at 4fs, pressure = 1.0
 Timestep policy:
   2fs : timestep = 0.002, rigid_bond = YES
   4fs : timestep = 0.004, rigid_bond = YES + HMR
         - if the topology already has redistributed HMR masses, only raise
           hydrogen_mass_upper_bound to 3.3 for hydrogen recognition
         - otherwise enable runtime hydrogen_mr with hmr_target = all
+Neighbor-list policy:
+  nbupdate_period = 10
 
 Run this from anywhere:  python3 benchmark/generate_inputs.py
 """
@@ -50,9 +53,7 @@ SYSTEMS = {
         ],
         energy_water=None,
         constraints_extra=["water_model      = WAT"],
-        nbupdate=20,
         box=("1", "1", "1"), domain=False, npt_drops_box=False,
-        baroscale1=False,
     ),
     # ---- CHARMM: ApoA1 ----
     "apoa1": dict(
@@ -76,9 +77,7 @@ SYSTEMS = {
         ],
         energy_water=None,
         constraints_extra=[],
-        nbupdate=20,
         box=("107.4979", "107.4979", "76.7872"), domain=True, npt_drops_box=True,
-        baroscale1=False,
     ),
     # ---- CHARMM: UUN ----
     "uun": dict(
@@ -110,9 +109,7 @@ SYSTEMS = {
         ],
         energy_water="NONE",
         constraints_extra=[],
-        nbupdate=20,
         box=("126.5795", "126.5795", "130.6978"), domain=True, npt_drops_box=False,
-        baroscale1=False,
     ),
     # ---- AMBER: FactorIX ----
     "factorix": dict(
@@ -130,10 +127,8 @@ SYSTEMS = {
         ],
         energy_water=None,
         constraints_extra=["water_model      = WAT"],
-        nbupdate=20,
         box=("142.0855468", "83.3368905", "78.6783548"), domain=False, npt_drops_box=True,
         pre_hmr_4fs=True,
-        baroscale1=False,
     ),
     # ---- GROAMBER: BPTI ----
     "bpti": dict(
@@ -156,9 +151,7 @@ SYSTEMS = {
         ],
         energy_water=None,
         constraints_extra=["water_model      = SOL"],
-        nbupdate=10,
         box=None, domain=True, npt_drops_box=False,
-        baroscale1=False,
     ),
     # ---- CHARMM: DPPC ----
     "dppc": dict(
@@ -184,9 +177,7 @@ SYSTEMS = {
         ],
         energy_water=None,
         constraints_extra=[],
-        nbupdate=10,
         box=None, domain=True, npt_drops_box=False,
-        baroscale1=False,
     ),
     # ---- AMBER: AKE ----
     "ake": dict(
@@ -210,9 +201,7 @@ SYSTEMS = {
         ],
         energy_water="WAT",
         constraints_extra=["water_model      = WAT"],
-        nbupdate=10,
         box=None, domain=True, npt_drops_box=False,
-        baroscale1=False,
     ),
     # ---- AMBER: STMV (huge) ----
     "stmv": dict(
@@ -229,10 +218,8 @@ SYSTEMS = {
         ],
         energy_water=None,
         constraints_extra=["water_model      = WAT"],
-        nbupdate=10,
         box=("221.1723142", "223.1988809", "224.4925841"), domain=False, npt_drops_box=False,
         pre_hmr_4fs=True,
-        baroscale1=True,
     ),
 }
 
@@ -242,6 +229,8 @@ DTS = {"2fs": "0.002", "4fs": "0.004"}
 # Default steady-state window for a standalone run. The driver overrides nsteps/eneout_period.
 BASE_NSTEPS = 10000
 BASE_ENEOUT = 1000
+DEFAULT_NBUPDATE_PERIOD = 10
+COUPLING_PERIOD_BY_DT = {"2fs": 10, "4fs": 5}
 
 
 def boundary_block(cfg, ens):
@@ -258,6 +247,7 @@ def boundary_block(cfg, ens):
 
 def make_input(sysname, ens, dt):
     cfg = SYSTEMS[sysname]
+    coupling_period = COUPLING_PERIOD_BY_DT[dt]
     L = []
     # [INPUT]
     L.append("[INPUT]")
@@ -286,13 +276,12 @@ def make_input(sysname, ens, dt):
         L.append("hmr_target       = all")
         L.append("hmr_ratio        = 3.0")
     L.append("eneout_period    = %d" % BASE_ENEOUT)
-    L.append("nbupdate_period  = %d" % cfg["nbupdate"])
+    L.append("nbupdate_period  = %d" % DEFAULT_NBUPDATE_PERIOD)
     if ens in ("nvt", "npt"):
-        L.append("thermostat_period = 10")
+        L.append("thermostat_period = %d" % coupling_period)
     if ens == "npt":
-        L.append("barostat_period  = 10")
-        if cfg["baroscale1"]:
-            L.append("baroscale_period = 1")
+        L.append("barostat_period  = %d" % coupling_period)
+        L.append("baroscale_period = %d" % coupling_period)
     L.append("")
     # [CONSTRAINTS]
     L.append("[CONSTRAINTS]")

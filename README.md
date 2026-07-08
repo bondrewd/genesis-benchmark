@@ -51,8 +51,9 @@ NVT variants are derived by dropping the barostat (NPT->NVT) and the thermostat
 
 * **Ensemble** (`nve` / `nvt` / `npt`), uniform across the matrix so cells are comparable:
   * `nve` : `tpcontrol = NO`
-  * `nvt` : `tpcontrol = BUSSI`, `thermostat_period = 10`
-  * `npt` : `tpcontrol = BUSSI`, `thermostat_period = 10`, `barostat_period = 10`, `pressure = 1.0`
+  * `nvt` : `tpcontrol = BUSSI`; `thermostat_period = 10` at 2 fs and `5` at 4 fs
+  * `npt` : `tpcontrol = BUSSI`; `thermostat_period`, `barostat_period`, and
+    `baroscale_period` are `10` at 2 fs and `5` at 4 fs; `pressure = 1.0`
   * all use `group_tp = YES`, `temperature = 300`, fixed `iseed = 314159` for reproducibility.
 * **Timestep** (`2fs` / `4fs`):
   * `2fs` : `timestep = 0.002`, `rigid_bond = YES`
@@ -64,8 +65,10 @@ NVT variants are derived by dropping the barostat (NPT->NVT) and the thermostat
     all`, and `hmr_ratio = 3.0`, plus the same 3.3 recognition threshold.
 
 The base inputs ship with `nsteps = 10000`, `eneout_period = 1000` (so they run
-stand-alone), but the driver overrides `nsteps`/`eneout_period` for every run.
-`[OUTPUT]` is empty, so no trajectory/restart files are written.
+stand-alone), and `nbupdate_period = 10`. The driver overrides
+`nsteps`/`eneout_period` for every run and can override `nbupdate_period` and
+NPT `baroscale_period` from the CLI. `[OUTPUT]` is empty, so no
+trajectory/restart files are written.
 
 ### Input data archives
 
@@ -106,6 +109,8 @@ already-published or already-created history may also need to be rewritten
    * kernel block sizes (the `kernel_*` paste-ready lines),
    * `cell_size` (the `Selected configuration: cell_size = X` line),
    * `pairlistdist` + `nbupdate_period` (the neighbor-list candidate marked `(selected)`).
+   Manual `--nbupdate-period` is rejected with `--tune nblist`, because
+   `pairlistdist` and `nbupdate_period` are selected as a coupled pair.
 2. **PIN** — write a *fresh* input that hard-codes the tuned values
    (`kernel_*` into `[GPU]`, `cell_size` + `pairlistdist` into `[ENERGY]`,
    `nbupdate_period` into `[DYNAMICS]`) and turns **all** autotuners OFF, so the
@@ -143,6 +148,8 @@ python3 run_benchmark.py [options]
 --full-autotune              shortcut for --tune kernel,cell,nblist
 --nsteps        N            (default 10000) measurement-run nsteps (eneout_period is matched)
 --tune-nsteps   N            (default 10000) tuning-run nsteps
+--nbupdate-period N          DYNAMICS nbupdate_period override (default: input value, 10 in generated inputs)
+--baroscale-period N         NPT DYNAMICS baroscale_period override (default: input value)
 --timeout    S               (default 7200)  per-run timeout
 --lock       PATH            (default /tmp/bench.lock)
 --allow-failures             write partial CSV and exit 0 even if cells fail
@@ -213,7 +220,7 @@ apoa1      nve   2fs        135.57       0.20    0.1%
 
 `results/<timestamp>.csv` columns:
 `system, ensemble, dt, ns_per_day_mean, ns_per_day_std, cv_pct, n_measure,
-cell_size, pairlistdist, nbupdate_period, tuners, note, raw_ns_per_day`
+cell_size, pairlistdist, nbupdate_period, baroscale_period, tuners, note, raw_ns_per_day`
 (the last column is the `|`-joined per-run ns/day so you can inspect variance).
 
 A high `cv%` flags an unstable measurement (thermal throttling or contention on

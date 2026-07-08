@@ -4,6 +4,8 @@
 Protocol, per selected (system, ensemble, dt) cell:
   1. TUNE   : run ONCE with the requested autotuners ON, parse the [AUTOTUNE] report
               to extract the tuned kernel block sizes / cell_size / pairlistdist / nbupdate_period.
+              A manual --nbupdate-period is incompatible with the nblist tuner because
+              pairlistdist and nbupdate_period are selected as a coupled pair.
   2. PIN    : write a FRESH input that hard-codes the tuned values and turns ALL autotuners OFF,
               so the measured runs carry no autotune instrumentation.
   3. WARM-UP: run the pinned input N times (default 2), discard timings (heat the GPU / stabilise clocks).
@@ -24,6 +26,8 @@ on disk; only a live flock owner blocks another run.
 Examples:
   # default tune (kernel only), 2 systems, small window, quick:
   python3 run_benchmark.py --systems dhfr,apoa1 --ensembles nve,nvt --dt 2 --warmup 1 --measure 3 --nsteps 2000 --tune-nsteps 3000
+  # override neighbor-list/barostat scaling periods for generated work inputs:
+  python3 run_benchmark.py --systems dhfr --nbupdate-period 20 --baroscale-period 10
   # full run, all 8 systems x 3 ensembles x 2 dt, all three autotuners:
   python3 run_benchmark.py --full-autotune
   # choose a subset of tuners:
@@ -108,6 +112,23 @@ def set_kv(blocks, section, key, value):
     lines.insert(1, "%-16s = %s" % (key, val))
 
 
+def has_kv(blocks, section, key):
+    b = _find_block(blocks, section)
+    if b is None:
+        return False
+    prev_cont = False
+    for ln in b[1][1:]:
+        stripped = ln.strip()
+        is_cont = prev_cont
+        prev_cont = stripped.endswith("\\")
+        if is_cont or stripped.startswith("#"):
+            continue
+        m = KEYLINE_RE.match(ln)
+        if m and m.group(1).lower() == key.lower():
+            return True
+    return False
+
+
 def get_kv(text, section, key):
     b = _find_block(split_sections(text), section)
     if b is None:
@@ -129,6 +150,13 @@ def set_window(blocks, nsteps):
     """Set nsteps and make eneout_period divide it (eneout_period = nsteps)."""
     set_kv(blocks, "DYNAMICS", "nsteps", nsteps)
     set_kv(blocks, "DYNAMICS", "eneout_period", nsteps)
+
+
+def set_period_overrides(blocks, nbupdate_period, baroscale_period):
+    if nbupdate_period is not None:
+        set_kv(blocks, "DYNAMICS", "nbupdate_period", nbupdate_period)
+    if baroscale_period is not None and has_kv(blocks, "DYNAMICS", "barostat_period"):
+        set_kv(blocks, "DYNAMICS", "baroscale_period", baroscale_period)
 
 
 # ---------------------------------------------------------------------------
@@ -372,9 +400,10 @@ def run_spdyn(inp_path, timeout):
 # ---------------------------------------------------------------------------
 # Tune / pin input builders
 # ---------------------------------------------------------------------------
-def build_tune_input(base_text, tune_set, nsteps):
+def build_tune_input(base_text, tune_set, nsteps, nbupdate_period, baroscale_period):
     blocks = split_sections(base_text)
     set_window(blocks, nsteps)
+    set_period_overrides(blocks, nbupdate_period, baroscale_period)
     if "cell" in tune_set:
         set_kv(blocks, "ENERGY", "cell_size_autotune", "YES")
     if "nblist" in tune_set:
@@ -384,7 +413,7 @@ def build_tune_input(base_text, tune_set, nsteps):
     return join_sections(blocks)
 
 
-def build_pinned_input(base_text, tuned, tune_set, nsteps):
+def build_pinned_input(base_text, tuned, tune_set, nsteps, nbupdate_period, baroscale_period):
     blocks = split_sections(base_text)
     set_window(blocks, nsteps)
     # All autotuners explicitly OFF.
@@ -403,6 +432,7 @@ def build_pinned_input(base_text, tuned, tune_set, nsteps):
             set_kv(blocks, "ENERGY", "pairlistdist", "%.3f" % tuned["pairlistdist"])
         if "nbupdate_period" in tuned:
             set_kv(blocks, "DYNAMICS", "nbupdate_period", tuned["nbupdate_period"])
+    set_period_overrides(blocks, nbupdate_period, baroscale_period)
     return join_sections(blocks)
 
 
@@ -426,6 +456,16 @@ def unique_output_path(path):
     raise RuntimeError("could not find an unused output path for %s" % path)
 
 
+def positive_int(text):
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be an integer")
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be >= 1")
+    return value
+
+
 def run_cell(sysname, ens, dt, args):
     tag = "%s_%s_%s" % (sysname, ens, dt)
     base_path = os.path.join(INPUTS, tag + ".inp")
@@ -439,7 +479,8 @@ def run_cell(sysname, ens, dt, args):
     # 1. TUNE
     if args.tune_set:
         tune_inp = os.path.join(WORK, tag + ".tune.inp")
-        open(tune_inp, "w").write(build_tune_input(base_text, args.tune_set, args.tune_nsteps))
+        open(tune_inp, "w").write(build_tune_input(base_text, args.tune_set, args.tune_nsteps,
+                                                   args.nbupdate_period, args.baroscale_period))
         log("  [tune] %s  tuners=%s  nsteps=%d" % (tag, ",".join(sorted(args.tune_set)), args.tune_nsteps))
         out, err, rc, wall = run_spdyn(tune_inp, args.timeout)
         if rc != 0:
@@ -465,7 +506,11 @@ def run_cell(sysname, ens, dt, args):
 
     # 2. PIN
     pin_inp = os.path.join(WORK, tag + ".pinned.inp")
-    open(pin_inp, "w").write(build_pinned_input(base_text, tuned, args.tune_set, args.nsteps))
+    pin_text = build_pinned_input(base_text, tuned, args.tune_set, args.nsteps,
+                                  args.nbupdate_period, args.baroscale_period)
+    open(pin_inp, "w").write(pin_text)
+    actual_nbupdate_period = get_kv(pin_text, "DYNAMICS", "nbupdate_period")
+    actual_baroscale_period = get_kv(pin_text, "DYNAMICS", "baroscale_period")
 
     # 3. WARM-UP
     for w in range(args.warmup):
@@ -493,7 +538,9 @@ def run_cell(sysname, ens, dt, args):
     std = statistics.stdev(vals) if len(vals) > 1 else 0.0
     cv = (std / mean * 100.0) if mean else 0.0
     return dict(system=sysname, ensemble=ens, dt=dt, mean=mean, std=std, cv=cv,
-                n=len(vals), vals=vals, tuned=tuned, note=note)
+                n=len(vals), vals=vals, tuned=tuned, note=note,
+                nbupdate_period=actual_nbupdate_period,
+                baroscale_period=actual_baroscale_period)
 
 
 def main():
@@ -512,6 +559,10 @@ def main():
                     help="shortcut for --tune kernel,cell,nblist")
     ap.add_argument("--nsteps", type=int, default=10000, help="measurement-run nsteps (default 10000)")
     ap.add_argument("--tune-nsteps", type=int, default=10000, help="tuning-run nsteps (default 10000)")
+    ap.add_argument("--nbupdate-period", type=positive_int, default=None,
+                    help="DYNAMICS nbupdate_period override for work inputs (default: input value, 10 in generated inputs)")
+    ap.add_argument("--baroscale-period", type=positive_int, default=None,
+                    help="DYNAMICS baroscale_period override for NPT work inputs (default: use input value)")
     ap.add_argument("--timeout", type=int, default=7200, help="per-run timeout seconds (default 7200)")
     ap.add_argument("--lock", default="/tmp/bench.lock", help="advisory serialisation lockfile")
     ap.add_argument("--allow-failures", action="store_true",
@@ -543,6 +594,9 @@ def main():
             if bad:
                 ap.error("unknown tuner(s): %s (use kernel,cell,nblist,all,none)" % ",".join(bad))
     args.tune_set = tune
+    if "nblist" in args.tune_set and args.nbupdate_period is not None:
+        ap.error("--nbupdate-period cannot be combined with nblist autotune; "
+                 "pairlistdist and nbupdate_period are tuned as a coupled pair")
 
     systems = [s.strip() for s in args.systems.split(",") if s.strip()]
     ensembles = [e.strip().lower() for e in args.ensembles.split(",") if e.strip()]
@@ -578,6 +632,8 @@ def main():
         log("tuners     : %s" % (",".join(sorted(tune)) or "none"))
         log("warmup/measure: %d/%d   nsteps meas/tune: %d/%d" %
             (args.warmup, args.measure, args.nsteps, args.tune_nsteps))
+        log("nbupdate  : %s" % (args.nbupdate_period if args.nbupdate_period is not None else "input"))
+        log("baroscale : %s" % (args.baroscale_period if args.baroscale_period is not None else "input"))
         log("lock       : %s" % args.lock)
         log("csv        : %s" % csv_path)
         if csv_path != requested_csv_path:
@@ -600,14 +656,15 @@ def main():
         # Write CSV while the suite lock is still held, so same --out invocations cannot collide.
         with open(csv_path, "x") as f:
             f.write("system,ensemble,dt,ns_per_day_mean,ns_per_day_std,cv_pct,n_measure,"
-                    "cell_size,pairlistdist,nbupdate_period,tuners,note,raw_ns_per_day\n")
+                    "cell_size,pairlistdist,nbupdate_period,baroscale_period,tuners,note,raw_ns_per_day\n")
             for r in results:
                 t = r["tuned"]
-                f.write("%s,%s,%s,%.3f,%.3f,%.2f,%d,%s,%s,%s,%s,%s,%s\n" % (
+                f.write("%s,%s,%s,%.3f,%.3f,%.2f,%d,%s,%s,%s,%s,%s,%s,%s\n" % (
                     r["system"], r["ensemble"], r["dt"], r["mean"], r["std"], r["cv"], r["n"],
                     ("%.3f" % t["cell_size"]) if "cell_size" in t else "",
                     ("%.3f" % t["pairlistdist"]) if "pairlistdist" in t else "",
-                    t.get("nbupdate_period", ""),
+                    r["nbupdate_period"],
+                    r["baroscale_period"] or "",
                     "|".join(sorted(tune)) or "none",
                     r.get("note", ""),
                     "|".join("%.3f" % v for v in r["vals"])))

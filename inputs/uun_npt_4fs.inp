@@ -38,9 +38,10 @@ hydrogen_mr      = YES
 hmr_target       = all
 hmr_ratio        = 3.0
 eneout_period    = 1000
-nbupdate_period  = 20
-thermostat_period = 10
-barostat_period  = 10
+nbupdate_period  = 10
+thermostat_period = 5
+barostat_period  = 5
+baroscale_period = 5
 
 [CONSTRAINTS]
 rigid_bond       = YES

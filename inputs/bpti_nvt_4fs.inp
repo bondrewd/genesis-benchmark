@@ -29,7 +29,7 @@ hmr_target       = all
 hmr_ratio        = 3.0
 eneout_period    = 1000
 nbupdate_period  = 10
-thermostat_period = 10
+thermostat_period = 5
 
 [CONSTRAINTS]
 rigid_bond       = YES

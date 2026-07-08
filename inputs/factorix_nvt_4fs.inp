@@ -20,8 +20,8 @@ iseed            = 314159
 nsteps           = 10000
 timestep         = 0.004
 eneout_period    = 1000
-nbupdate_period  = 20
-thermostat_period = 10
+nbupdate_period  = 10
+thermostat_period = 5
 
 [CONSTRAINTS]
 rigid_bond       = YES
