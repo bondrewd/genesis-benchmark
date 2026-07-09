@@ -45,7 +45,7 @@ The default run uses:
 
 - all systems: `dhfr_27k,dhfr_23k,apoa1,uun,factorix,bpti,dppc,ake,stmv,cellulose`
 - all ensembles: `nve,nvt,npt`
-- both time steps: `2fs,4fs`
+- both time steps: `2fs,4fs`, except `factorix` and `stmv`, which run only `4fs`
 - kernel autotuning
 - `100000` production steps
 - `50000` autotuning steps
@@ -169,11 +169,12 @@ The checked-in input files live in `inputs/`. Regenerate them with:
 python generate_inputs.py
 ```
 
-The generated input matrix covers:
+The generated input matrix covers 54 benchmark cells:
 
 - systems: `dhfr_27k, dhfr_23k, apoa1, uun, factorix, bpti, dppc, ake, stmv, cellulose`
 - ensembles: `nve, nvt, npt`
-- time steps: `2fs, 4fs`
+- time steps: `2fs, 4fs` for normal-mass topologies, and only `4fs` for
+  `factorix` and `stmv`
 
 ## Notes
 
@@ -189,5 +190,7 @@ The generated input matrix covers:
   treated as HMR-only inputs; those inputs set `hydrogen_mass_upper_bound = 3.3`
   and do not use the `hydrogen_mr`, `hmr_target`, or `hmr_ratio` runtime-scaling
   options.
+- `factorix` and `stmv` use HMR topologies, so the benchmark does not generate
+  or run 2 fs inputs for those systems.
 - `data/stmv.tgz` is compressed so no single tracked file is larger than
   GitHub's 100 MB file limit.

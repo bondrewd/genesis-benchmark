@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Generate the GENESIS benchmark input matrix.
 
-The matrix contains 10 systems, 3 ensembles, and 2 time steps. Each generated
-input uses paths relative to the benchmark repository root because the benchmark
-driver launches GENESIS from that directory.
+The generated inputs cover 10 systems, 3 ensembles, and each system's supported
+time steps. Each generated input uses paths relative to the benchmark repository
+root because the benchmark driver launches GENESIS from that directory.
 """
 
 import os
@@ -133,6 +133,7 @@ SYSTEMS = {
         domain=False,
         npt_drops_box=True,
         hmr_topology=True,
+        time_steps=("4fs",),
     ),
     "bpti": dict(
         forcefield="GROAMBER",
@@ -228,6 +229,7 @@ SYSTEMS = {
         domain=False,
         npt_drops_box=False,
         hmr_topology=True,
+        time_steps=("4fs",),
     ),
     "cellulose": dict(
         forcefield="AMBER",
@@ -255,6 +257,11 @@ BASE_NUM_STEPS = 100000
 BASE_ENEOUT_PERIOD = 1000
 DEFAULT_NBUPDATE_PERIOD = 10
 COUPLING_PERIOD_BY_TIME_STEP = {"2fs": 10, "4fs": 5}
+
+
+def system_time_steps(config):
+    """Return supported time-step labels for one system."""
+    return config.get("time_steps", tuple(TIME_STEPS))
 
 
 def boundary_block(config, ensemble):
@@ -338,9 +345,9 @@ def main():
     """Write all generated input files."""
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     files_written = 0
-    for system_name in SYSTEMS:
+    for system_name, config in SYSTEMS.items():
         for ensemble in ENSEMBLES:
-            for time_step in TIME_STEPS:
+            for time_step in system_time_steps(config):
                 file_name = "%s_%s_%s.inp" % (system_name, ensemble, time_step)
                 output_path = os.path.join(OUTPUT_DIR, file_name)
                 with open(output_path, "w") as input_file:

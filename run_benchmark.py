@@ -45,6 +45,9 @@ ALL_SYSTEMS = [
 ]
 ALL_ENSEMBLES = ["nve", "nvt", "npt"]
 ALL_TIME_STEPS = ["2fs", "4fs"]
+SYSTEM_TIME_STEPS = dict((system_name, list(ALL_TIME_STEPS)) for system_name in ALL_SYSTEMS)
+SYSTEM_TIME_STEPS["factorix"] = ["4fs"]
+SYSTEM_TIME_STEPS["stmv"] = ["4fs"]
 ARCHIVE_SENTINEL = ".archive_sha256"
 KERNEL_KEYS = [
     "kernel_pme_spread_block",
@@ -691,9 +694,31 @@ def validate_eneout_period(args, parser):
                      (args.tune_num_steps, args.eneout_period))
 
 
+def planned_cells(system_names, ensembles, time_steps):
+    """Return runnable benchmark cells and unsupported requested cells."""
+    cells = []
+    skipped_cells = []
+    for system_name in system_names:
+        supported_time_steps = set(SYSTEM_TIME_STEPS[system_name])
+        for ensemble in ensembles:
+            for time_step in time_steps:
+                cell = (system_name, ensemble, time_step)
+                if time_step in supported_time_steps:
+                    cells.append(cell)
+                else:
+                    skipped_cells.append(cell)
+    return cells, skipped_cells
+
+
+def cell_label(cell):
+    """Return the input-file stem for a benchmark cell tuple."""
+    system_name, ensemble, time_step = cell
+    return "%s_%s_%s" % (system_name, ensemble, time_step)
+
+
 def run_cell(system_name, ensemble, time_step, args):
     """Run tuning, warmup, and measurement for one benchmark cell."""
-    tag = "%s_%s_%s" % (system_name, ensemble, time_step)
+    tag = cell_label((system_name, ensemble, time_step))
     base_path = os.path.join(INPUTS, tag + ".inp")
     if not os.path.isfile(base_path):
         log("  [skip] no base input %s" % base_path)
@@ -833,7 +858,7 @@ def csv_fieldnames(input_columns):
     ] + list(input_columns)
 
 
-def planned_input_columns(system_names, ensembles, time_steps, args):
+def planned_input_columns(cells, args):
     """Return input-option CSV columns for the selected benchmark matrix."""
     sentinel_tuned_values = {
         "kernel": dict((kernel_key, 0) for kernel_key in KERNEL_KEYS),
@@ -842,19 +867,17 @@ def planned_input_columns(system_names, ensembles, time_steps, args):
         "nbupdate_period": 0,
     }
     columns = set()
-    for system_name in system_names:
-        for ensemble in ensembles:
-            for time_step in time_steps:
-                tag = "%s_%s_%s" % (system_name, ensemble, time_step)
-                base_path = os.path.join(INPUTS, tag + ".inp")
-                if not os.path.isfile(base_path):
-                    continue
-                base_text = open(base_path).read()
-                pinned_text = build_pinned_input(
-                    base_text, sentinel_tuned_values, args.tune_set, args.num_steps,
-                    args.eneout_period, args.nbupdate_period, args.baroscale_period,
-                )
-                columns.update(input_options(pinned_text))
+    for cell in cells:
+        tag = cell_label(cell)
+        base_path = os.path.join(INPUTS, tag + ".inp")
+        if not os.path.isfile(base_path):
+            continue
+        base_text = open(base_path).read()
+        pinned_text = build_pinned_input(
+            base_text, sentinel_tuned_values, args.tune_set, args.num_steps,
+            args.eneout_period, args.nbupdate_period, args.baroscale_period,
+        )
+        columns.update(input_options(pinned_text))
     return sorted(columns)
 
 
@@ -1024,10 +1047,6 @@ def main():
     args = parser.parse_args()
     validate_eneout_period(args, parser)
 
-    SPDYN = os.path.abspath(os.path.expanduser(args.spdyn))
-    if not (os.path.isfile(SPDYN) and os.access(SPDYN, os.X_OK)):
-        sys.exit("error: spdyn not found or not executable: %s" % SPDYN)
-
     tune_set = resolve_tune_set(args, parser)
     args.tune_set = tune_set
     if "nblist" in tune_set and args.nbupdate_period is not None:
@@ -1037,6 +1056,13 @@ def main():
     system_names = parse_systems(args.systems_text, parser)
     ensembles = parse_ensembles(args.ensembles_text)
     time_steps = parse_time_steps(args.time_steps_text, parser)
+    cells, skipped_cells = planned_cells(system_names, ensembles, time_steps)
+    if not cells:
+        parser.error("no runnable cells; pre-HMR topologies factorix and stmv support only 4fs")
+
+    SPDYN = os.path.abspath(os.path.expanduser(args.spdyn))
+    if not (os.path.isfile(SPDYN) and os.access(SPDYN, os.X_OK)):
+        sys.exit("error: spdyn not found or not executable: %s" % SPDYN)
 
     results = []
     failures = []
@@ -1057,7 +1083,7 @@ def main():
             os.makedirs(args.input_log_dir, exist_ok=True)
             open_benchmark_log(os.path.join(log_root, "benchmark.log"))
 
-            input_columns = planned_input_columns(system_names, ensembles, time_steps, args)
+            input_columns = planned_input_columns(cells, args)
             create_results_csv(csv_path, input_columns)
 
             log("=== GENESIS GPU benchmark ===")
@@ -1079,19 +1105,20 @@ def main():
             log("summary    : %s" % os.path.join(log_root, "summary.log"))
             if csv_path != requested_csv_path:
                 log("csv note   : requested output existed; using non-overwriting suffix")
+            if skipped_cells:
+                log("skip       : %s (pre-HMR topology supports 4fs only)" %
+                    ",".join(cell_label(cell) for cell in skipped_cells))
             for system_name in extracted_systems:
                 log("data       : extracted data/%s.tgz -> data/%s/" % (system_name, system_name))
             log("")
 
-            for system_name in system_names:
-                for ensemble in ensembles:
-                    for time_step in time_steps:
-                        result = run_cell(system_name, ensemble, time_step, args)
-                        if result:
-                            results.append(result)
-                            append_result_csv(csv_path, result, tune_set, input_columns)
-                        else:
-                            failures.append("%s_%s_%s" % (system_name, ensemble, time_step))
+            for system_name, ensemble, time_step in cells:
+                result = run_cell(system_name, ensemble, time_step, args)
+                if result:
+                    results.append(result)
+                    append_result_csv(csv_path, result, tune_set, input_columns)
+                else:
+                    failures.append(cell_label((system_name, ensemble, time_step)))
         finally:
             release_lock(lock_fd)
 
