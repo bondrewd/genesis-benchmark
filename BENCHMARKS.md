@@ -103,3 +103,107 @@ git ls-files -s | awk '{print $4}' | while read -r f; do
 done
 # no output
 ```
+
+## 2026-07-09 09:44 JST - pre-HMR 2 fs setup regression check
+
+Repository commit: `5ae4972` (`genesis-benchmark`, dirty with this change).
+Scope: verify that FactorIX and STMV 2 fs inputs with pre-HMR topologies pass
+GENESIS setup and run a tiny 10-step window after adding
+`hydrogen_mass_upper_bound = 3.3`. This is not a performance baseline.
+
+Command:
+
+```bash
+uv run run_benchmark.py --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn --systems factorix,stmv --ensembles nve,nvt,npt --dt 2 --tune kernel --warmup 0 --measure 1 --nsteps 10 --tune-nsteps 10 --timeout 300 --timestamp verify-prehmr-2fs
+```
+
+Result: all six cells completed with no setup/tune/measure failures.
+
+```text
+factorix,nve,2fs,86.27,0.00,0.0,1,raw=86.270
+factorix,nvt,2fs,85.46,0.00,0.0,1,raw=85.460
+factorix,npt,2fs,86.35,0.00,0.0,1,raw=86.350
+stmv,nve,2fs,2.58,0.00,0.0,1,raw=2.580
+stmv,nvt,2fs,2.59,0.00,0.0,1,raw=2.590
+stmv,npt,2fs,2.47,0.00,0.0,1,raw=2.470
+```
+
+## 2026-07-09 11:17 JST - per-run logging and CSV smoke check
+
+Repository commit: `5ae4972` (`genesis-benchmark`, dirty with this change).
+Scope: functional check for the benchmark driver's per-result log bundle and
+per-measurement CSV rows. This is a 10-step smoke test, not a performance
+baseline.
+
+Command:
+
+```bash
+uv run run_benchmark.py --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn --systems dhfr --ensembles nve --dt 2 --tune kernel --warmup 1 --measure 2 --nsteps 10 --tune-nsteps 10 --timeout 120 --timestamp log-smoke2
+```
+
+Result: completed without failures. The driver wrote
+`results/log-smoke2.csv`, `results/log-smoke2/summary.log`, exact generated
+inputs under `results/log-smoke2/inputs/`, one autotune log, one warmup log, and
+two measured production logs. The CSV contains two rows with `run_id`,
+`ns_per_day`, `num_atoms=27346`, tuned kernel columns, input option columns, and
+log-path columns.
+
+```text
+dhfr,nve,2fs,mean=208.795,median=208.795,std=0.007,cv=0.00,n=2,raw=208.790|208.800
+```
+
+## 2026-07-09 12:01 JST - benchmark.log / summary.log split smoke check
+
+Repository commit: `5ae4972` (`genesis-benchmark`, dirty with this change).
+Scope: functional check that the full progress transcript is written to
+`benchmark.log` and `summary.log` contains only the final aggregate table. This
+is a 10-step smoke test, not a performance baseline.
+
+Command:
+
+```bash
+uv run run_benchmark.py --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn --systems dhfr --ensembles nve --dt 2 --tune kernel --warmup 1 --measure 2 --nsteps 10 --tune-nsteps 10 --timeout 120 --timestamp log-summary-smoke
+```
+
+Result: completed without failures. `results/log-summary-smoke/benchmark.log`
+contains the full benchmark progress log. `results/log-summary-smoke/summary.log`
+starts with the `=== ns/day ... ===` table header and excludes setup/progress
+lines and the `CSV written` footer.
+
+```text
+dhfr,nve,2fs,mean=210.605,median=210.605,std=0.870,cv=0.41,n=2,raw=211.220|209.990
+```
+
+## 2026-07-09 12:13 JST - eneout_period CLI smoke check
+
+Repository commit: `5ae4972` (`genesis-benchmark`, dirty with this change).
+Scope: functional check that the driver accepts `--eneout-period`, validates the
+step-count divisibility rule, and writes the requested value into the generated
+tune and pinned inputs. This is a 10-step smoke test, not a performance
+baseline.
+
+Validation checks:
+
+```bash
+python3 run_benchmark.py --nsteps 1500 --tune-nsteps 50000 --eneout-period 1000
+# exits 2: --nsteps (1500) must be a multiple of --eneout-period (1000)
+
+python3 run_benchmark.py --nsteps 100000 --tune-nsteps 50500 --eneout-period 1000
+# exits 2: --tune-nsteps (50500) must be a multiple of --eneout-period (1000)
+```
+
+Smoke command:
+
+```bash
+uv run run_benchmark.py --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn --systems dhfr --ensembles nve --dt 2 --tune kernel --warmup 0 --measure 1 --nsteps 10 --tune-nsteps 10 --eneout-period 10 --timeout 120 --timestamp eneout-smoke
+```
+
+Result: completed without failures. Both
+`results/eneout-smoke/inputs/dhfr_nve_2fs.tune.inp` and
+`results/eneout-smoke/inputs/dhfr_nve_2fs.pinned.inp` contain
+`nsteps = 10` and `eneout_period = 10`; the CSV row contains
+`input_dynamics_nsteps=10` and `input_dynamics_eneout_period=10`.
+
+```text
+dhfr,nve,2fs,mean=201.820,median=201.820,std=0.000,cv=0.00,n=1,raw=201.820
+```

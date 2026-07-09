@@ -22,7 +22,7 @@ nonbond_kernel   = GPU
 [DYNAMICS]
 integrator       = VVER
 iseed            = 314159
-nsteps           = 10000
+nsteps           = 100000
 timestep         = 0.004
 hydrogen_mr      = YES
 hmr_target       = all

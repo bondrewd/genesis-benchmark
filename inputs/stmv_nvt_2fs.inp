@@ -16,7 +16,7 @@ nonbond_kernel   = GPU
 [DYNAMICS]
 integrator       = VVER
 iseed            = 314159
-nsteps           = 10000
+nsteps           = 100000
 timestep         = 0.002
 eneout_period    = 1000
 nbupdate_period  = 10
@@ -25,6 +25,7 @@ thermostat_period = 10
 [CONSTRAINTS]
 rigid_bond       = YES
 water_model      = WAT
+hydrogen_mass_upper_bound = 3.3
 
 [ENSEMBLE]
 ensemble         = NVT

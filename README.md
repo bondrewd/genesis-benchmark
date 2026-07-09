@@ -26,7 +26,13 @@ benchmark/
   data/<sys>/             # extracted local topology + coordinates (generated, ignored)
   inputs/<sys>_<ens>_<dt>.inp   # the 48 base inputs (referenced by the driver)
   results/<timestamp>.csv       # one local CSV per driver run (generated, ignored)
-  results/work/                 # generated .tune.inp / .pinned.inp per cell (ignored)
+  results/<timestamp>/           # raw logs for that CSV (generated, ignored)
+    benchmark.log
+    summary.log
+    inputs/<sys>_<ens>_<dt>.tune.inp
+    inputs/<sys>_<ens>_<dt>.pinned.inp
+    autotune/<sys>_<ens>_<dt>_1.log
+    production/<sys>_<ens>_<dt>_1.log
 ```
 
 ### The 8 systems (`<sys>`)
@@ -63,11 +69,15 @@ NVT variants are derived by dropping the barostat (NPT->NVT) and the thermostat
     recognizes those heavier H atoms as hydrogens. Inputs with ordinary hydrogen
     masses enable GENESIS runtime HMR with `hydrogen_mr = YES`, `hmr_target =
     all`, and `hmr_ratio = 3.0`, plus the same 3.3 recognition threshold.
+    Because Factor IX and STMV use the same pre-HMR topology in both timestep
+    variants, their 2 fs inputs also set `hydrogen_mass_upper_bound = 3.3`.
 
-The base inputs ship with `nsteps = 10000`, `eneout_period = 1000` (so they run
-stand-alone), and `nbupdate_period = 10`. The driver overrides
-`nsteps`/`eneout_period` for every run and can override `nbupdate_period` and
-NPT `baroscale_period` from the CLI. `[OUTPUT]` is empty, so no
+The base inputs ship with `nsteps = 100000`, `eneout_period = 1000` (so they run
+stand-alone), and `nbupdate_period = 10`. The driver overrides `nsteps` for
+tuning and measurement runs, uses `eneout_period = 1000` by default, and can
+override `eneout_period`, `nbupdate_period`, and NPT `baroscale_period` from the
+CLI. Both measurement and tuning `nsteps` must be exact multiples of
+`eneout_period`. `[OUTPUT]` is empty, so no
 trajectory/restart files are written.
 
 ### Input data archives
@@ -119,18 +129,20 @@ already-published or already-created history may also need to be rewritten
    (heat the GPU / stabilise clocks).
 4. **MEASURE** — run the pinned input `--measure` times (default 10), collect the
    `[PERFORMANCE]` ns/day of each.
-5. Report **mean ± std (and cv%)** and append a row to `results/<timestamp>.csv`.
+5. Report **mean, median, std, and cv%** and append one row per measured run to
+   `results/<timestamp>.csv` after each completed cell.
 
 Every `spdyn` launch is
 ```
-GENESIS_GPU_PROFILE=0 OMP_NUM_THREADS=1 HWLOC_COMPONENTS=x86 \
-    mpirun -np 1 <repo>/src/spdyn_singlempi/spdyn <input>
+GENESIS_GPU_PROFILE=0 OMP_NUM_THREADS=<omp-threads> HWLOC_COMPONENTS=x86 \
+    mpirun -np <mpi-procs> <repo>/src/spdyn_singlempi/spdyn <input>
 ```
-run from the benchmark root, and the ns/day is read from the `[PERFORMANCE]` line
+run from the benchmark root, with defaults `--mpi-procs 1` and
+`--omp-threads 1`. The ns/day is read from the `[PERFORMANCE]` line
 (GPU-synced, profiler-independent). Runs are **serialised through an advisory
 lockfile** (`/tmp/bench.lock`) so concurrent agents never benchmark at the same
-time. The lock file itself may remain on disk; this is harmless because the lock
-is owned by the live process, not by file existence.
+time. The lock file itself may remain on disk; this is harmless because the
+lock is owned by the live process, not by file existence.
 
 ---
 
@@ -146,8 +158,11 @@ python3 run_benchmark.py [options]
 --measure   M                (default 10)  timed runs
 --tune      kernel|cell|nblist|all|none  (default: kernel)   comma-list allowed
 --full-autotune              shortcut for --tune kernel,cell,nblist
---nsteps        N            (default 10000) measurement-run nsteps (eneout_period is matched)
---tune-nsteps   N            (default 10000) tuning-run nsteps
+--nsteps        N            (default 100000) measurement-run nsteps
+--tune-nsteps   N            (default 50000) tuning-run nsteps
+--eneout-period N            (default 1000) DYNAMICS eneout_period; nsteps must be multiples
+--mpi-procs     N            (default 1) MPI process count for each spdyn launch
+--omp-threads   N            (default 1) OMP_NUM_THREADS for each spdyn launch
 --nbupdate-period N          DYNAMICS nbupdate_period override (default: input value, 10 in generated inputs)
 --baroscale-period N         NPT DYNAMICS baroscale_period override (default: input value)
 --timeout    S               (default 7200)  per-run timeout
@@ -162,7 +177,7 @@ python3 run_benchmark.py [options]
 ```bash
 # Quick end-to-end check on two fast cells (what was used to validate this harness):
 python3 run_benchmark.py --systems dhfr,apoa1 --ensembles nve,nvt --dt 2,4 \
-    --tune kernel --warmup 1 --measure 3 --nsteps 2500 --tune-nsteps 3500
+    --tune kernel --warmup 1 --measure 3 --nsteps 2000 --tune-nsteps 3000
 
 # The default kernel-only tune, all 8 systems, full 10-sample measurement:
 python3 run_benchmark.py
@@ -213,15 +228,36 @@ dependable end-to-end numbers, use the default `--tune kernel`.
 Console prints a table:
 
 ```
-system     ens   dt         ns/day      +-std     cv%  note
-dhfr       nve   2fs        702.45       0.55    0.1%
-apoa1      nve   2fs        135.57       0.20    0.1%
+system     ens   dt           mean       median      +-std     cv%  note
+dhfr       nve   2fs        702.45       702.47       0.55    0.1%
+apoa1      nve   2fs        135.57       135.55       0.20    0.1%
 ```
 
-`results/<timestamp>.csv` columns:
-`system, ensemble, dt, ns_per_day_mean, ns_per_day_std, cv_pct, n_measure,
-cell_size, pairlistdist, nbupdate_period, baroscale_period, tuners, note, raw_ns_per_day`
-(the last column is the `|`-joined per-run ns/day so you can inspect variance).
+For a CSV named `results/<timestamp>.csv`, the driver also creates
+`results/<timestamp>/` with:
+
+* `benchmark.log` — the full benchmark progress log printed by the driver.
+* `summary.log` — only the final aggregate ns/day table.
+* `inputs/<sys>_<ens>_<dt>.tune.inp` and
+  `inputs/<sys>_<ens>_<dt>.pinned.inp` — the exact generated GENESIS inputs used
+  for that result bundle.
+* `autotune/<sys>_<ens>_<dt>_1.log` — raw GENESIS stdout/stderr from the tuning
+  phase for each tuned cell.
+* `production/<sys>_<ens>_<dt>_<run_id>.log` — raw GENESIS stdout/stderr for
+  each measured production run. Warmups are also preserved as
+  `production/<sys>_<ens>_<dt>_warmup_<id>.log`.
+
+`results/<timestamp>.csv` now stores one row per measured production run. Fixed
+columns include:
+`system, ensemble, dt, run_id, ns_per_day, wall_seconds, ns_per_day_mean,
+ns_per_day_median, ns_per_day_std, cv_pct, n_measure, mpi_procs, omp_threads,
+num_atoms, nbupdate_period, baroscale_period, tuners, note, autotune_log,
+production_log, tuned_cell_size, tuned_pairlistdist, tuned_nbupdate_period,
+tuned_kernel_*, input_options_json`.
+
+The remaining `input_<section>_<parameter>` columns are generated from the
+pinned input used for measurement, so each CSV row contains the actual GENESIS
+control parameters that produced the performance value.
 
 A high `cv%` flags an unstable measurement (thermal throttling or contention on
 the shared machine) — re-run that cell when the machine is quiet.

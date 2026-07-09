@@ -22,6 +22,9 @@ Timestep policy:
         - if the topology already has redistributed HMR masses, only raise
           hydrogen_mass_upper_bound to 3.3 for hydrogen recognition
         - otherwise enable runtime hydrogen_mr with hmr_target = all
+  Any topology that already contains redistributed HMR masses uses
+  hydrogen_mass_upper_bound = 3.3 at both 2fs and 4fs so GENESIS still
+  recognizes those atoms as hydrogens for constraints.
 Neighbor-list policy:
   nbupdate_period = 10
 
@@ -128,7 +131,7 @@ SYSTEMS = {
         energy_water=None,
         constraints_extra=["water_model      = WAT"],
         box=("142.0855468", "83.3368905", "78.6783548"), domain=False, npt_drops_box=True,
-        pre_hmr_4fs=True,
+        hmr_topology=True,
     ),
     # ---- GROAMBER: BPTI ----
     "bpti": dict(
@@ -219,15 +222,16 @@ SYSTEMS = {
         energy_water=None,
         constraints_extra=["water_model      = WAT"],
         box=("221.1723142", "223.1988809", "224.4925841"), domain=False, npt_drops_box=False,
-        pre_hmr_4fs=True,
+        hmr_topology=True,
     ),
 }
 
 ENSEMBLES = ("nve", "nvt", "npt")
 DTS = {"2fs": "0.002", "4fs": "0.004"}
 
-# Default steady-state window for a standalone run. The driver overrides nsteps/eneout_period.
-BASE_NSTEPS = 10000
+# Default steady-state window for a standalone run. The driver overrides nsteps
+# and can override eneout_period.
+BASE_NSTEPS = 100000
 BASE_ENEOUT = 1000
 DEFAULT_NBUPDATE_PERIOD = 10
 COUPLING_PERIOD_BY_DT = {"2fs": 10, "4fs": 5}
@@ -271,7 +275,7 @@ def make_input(sysname, ens, dt):
     L.append("iseed            = 314159")
     L.append("nsteps           = %d" % BASE_NSTEPS)
     L.append("timestep         = %s" % DTS[dt])
-    if dt == "4fs" and not cfg.get("pre_hmr_4fs", False):
+    if dt == "4fs" and not cfg.get("hmr_topology", False):
         L.append("hydrogen_mr      = YES")
         L.append("hmr_target       = all")
         L.append("hmr_ratio        = 3.0")
@@ -287,7 +291,7 @@ def make_input(sysname, ens, dt):
     L.append("[CONSTRAINTS]")
     L.append("rigid_bond       = YES")
     L += cfg["constraints_extra"]
-    if dt == "4fs":
+    if dt == "4fs" or cfg.get("hmr_topology", False):
         L.append("hydrogen_mass_upper_bound = 3.3")
     L.append("")
     # [ENSEMBLE]
