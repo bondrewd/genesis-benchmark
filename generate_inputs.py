@@ -1,43 +1,18 @@
 #!/usr/bin/env python3
-"""Generate the 48 benchmark input files: 8 systems x {nve,nvt,npt} x {2fs,4fs}.
+"""Generate the GENESIS benchmark input matrix.
 
-Each generated .inp lives in benchmark/inputs/ and references its system's data
-with a path RELATIVE TO THE BENCHMARK ROOT (data/<sys>/...). The benchmark driver
-(run_benchmark.py) always launches spdyn with cwd = the benchmark root, so those
-relative paths resolve correctly.
-
-Base parameters (force field, PME grid, cutoffs, box) are taken from the matching
-tests/performance_tests/NN/gpu.inp reference for that system+ensemble. Where a system
-only had an NPT reference (factorix, stmv) the NVE/NVT variants are derived by
-dropping the barostat (NPT->NVT) and the thermostat (NVT->NVE).
-
-Ensemble policy (uniform across the matrix, so the 48 cells are comparable):
-  NVE : tpcontrol = NO
-  NVT : tpcontrol = BUSSI, thermostat_period = 10 at 2fs and 5 at 4fs
-  NPT : tpcontrol = BUSSI, thermostat_period/barostat_period/baroscale_period
-        = 10 at 2fs and 5 at 4fs, pressure = 1.0
-Timestep policy:
-  2fs : timestep = 0.002, rigid_bond = YES
-  4fs : timestep = 0.004, rigid_bond = YES + HMR
-        - if the topology already has redistributed HMR masses, only raise
-          hydrogen_mass_upper_bound to 3.3 for hydrogen recognition
-        - otherwise enable runtime hydrogen_mr with hmr_target = all
-  Any topology that already contains redistributed HMR masses uses
-  hydrogen_mass_upper_bound = 3.3 at both 2fs and 4fs so GENESIS still
-  recognizes those atoms as hydrogens for constraints.
-Neighbor-list policy:
-  nbupdate_period = 10
-
-Run this from anywhere:  python3 benchmark/generate_inputs.py
+The matrix contains 8 systems, 3 ensembles, and 2 time steps. Each generated
+input uses paths relative to the benchmark repository root because the benchmark
+driver launches GENESIS from that directory.
 """
+
 import os
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(HERE, "inputs")
 
-# Per-system definitions. Paths are relative to the benchmark root (data/<sys>/...).
+HERE = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.join(HERE, "inputs")
+
 SYSTEMS = {
-    # ---- AMBER: DHFR / JAC ----
     "dhfr": dict(
         ff="AMBER",
         input=[
@@ -56,9 +31,10 @@ SYSTEMS = {
         ],
         energy_water=None,
         constraints_extra=["water_model      = WAT"],
-        box=("1", "1", "1"), domain=False, npt_drops_box=False,
+        box=("1", "1", "1"),
+        domain=False,
+        npt_drops_box=False,
     ),
-    # ---- CHARMM: ApoA1 ----
     "apoa1": dict(
         ff="CHARMM",
         input=[
@@ -80,9 +56,10 @@ SYSTEMS = {
         ],
         energy_water=None,
         constraints_extra=[],
-        box=("107.4979", "107.4979", "76.7872"), domain=True, npt_drops_box=True,
+        box=("107.4979", "107.4979", "76.7872"),
+        domain=True,
+        npt_drops_box=True,
     ),
-    # ---- CHARMM: UUN ----
     "uun": dict(
         ff="CHARMM",
         input=[
@@ -112,9 +89,10 @@ SYSTEMS = {
         ],
         energy_water="NONE",
         constraints_extra=[],
-        box=("126.5795", "126.5795", "130.6978"), domain=True, npt_drops_box=False,
+        box=("126.5795", "126.5795", "130.6978"),
+        domain=True,
+        npt_drops_box=False,
     ),
-    # ---- AMBER: FactorIX ----
     "factorix": dict(
         ff="AMBER",
         input=[
@@ -130,10 +108,11 @@ SYSTEMS = {
         ],
         energy_water=None,
         constraints_extra=["water_model      = WAT"],
-        box=("142.0855468", "83.3368905", "78.6783548"), domain=False, npt_drops_box=True,
+        box=("142.0855468", "83.3368905", "78.6783548"),
+        domain=False,
+        npt_drops_box=True,
         hmr_topology=True,
     ),
-    # ---- GROAMBER: BPTI ----
     "bpti": dict(
         ff="GROAMBER",
         input=[
@@ -154,9 +133,10 @@ SYSTEMS = {
         ],
         energy_water=None,
         constraints_extra=["water_model      = SOL"],
-        box=None, domain=True, npt_drops_box=False,
+        box=None,
+        domain=True,
+        npt_drops_box=False,
     ),
-    # ---- CHARMM: DPPC ----
     "dppc": dict(
         ff="CHARMM",
         input=[
@@ -180,9 +160,10 @@ SYSTEMS = {
         ],
         energy_water=None,
         constraints_extra=[],
-        box=None, domain=True, npt_drops_box=False,
+        box=None,
+        domain=True,
+        npt_drops_box=False,
     ),
-    # ---- AMBER: AKE ----
     "ake": dict(
         ff="AMBER",
         input=[
@@ -204,9 +185,10 @@ SYSTEMS = {
         ],
         energy_water="WAT",
         constraints_extra=["water_model      = WAT"],
-        box=None, domain=True, npt_drops_box=False,
+        box=None,
+        domain=True,
+        npt_drops_box=False,
     ),
-    # ---- AMBER: STMV (huge) ----
     "stmv": dict(
         ff="AMBER",
         input=[
@@ -221,105 +203,110 @@ SYSTEMS = {
         ],
         energy_water=None,
         constraints_extra=["water_model      = WAT"],
-        box=("221.1723142", "223.1988809", "224.4925841"), domain=False, npt_drops_box=False,
+        box=("221.1723142", "223.1988809", "224.4925841"),
+        domain=False,
+        npt_drops_box=False,
         hmr_topology=True,
     ),
 }
 
 ENSEMBLES = ("nve", "nvt", "npt")
-DTS = {"2fs": "0.002", "4fs": "0.004"}
-
-# Default steady-state window for a standalone run. The driver overrides nsteps
-# and can override eneout_period.
-BASE_NSTEPS = 100000
-BASE_ENEOUT = 1000
+TIME_STEPS = {"2fs": "0.002", "4fs": "0.004"}
+BASE_NUM_STEPS = 100000
+BASE_ENEOUT_PERIOD = 1000
 DEFAULT_NBUPDATE_PERIOD = 10
-COUPLING_PERIOD_BY_DT = {"2fs": 10, "4fs": 5}
+COUPLING_PERIOD_BY_TIME_STEP = {"2fs": 10, "4fs": 5}
 
 
-def boundary_block(cfg, ens):
+def boundary_block(config, ensemble):
+    """Return the [BOUNDARY] block for one system and ensemble."""
     lines = ["[BOUNDARY]", "type             = PBC"]
-    if cfg["box"] is not None and not (ens == "npt" and cfg["npt_drops_box"]):
-        bx, by, bz = cfg["box"]
-        lines += ["box_size_x       = %s" % bx,
-                  "box_size_y       = %s" % by,
-                  "box_size_z       = %s" % bz]
-    if cfg["domain"]:
+    if config["box"] is not None and not (ensemble == "npt" and config["npt_drops_box"]):
+        box_x, box_y, box_z = config["box"]
+        lines += [
+            "box_size_x       = %s" % box_x,
+            "box_size_y       = %s" % box_y,
+            "box_size_z       = %s" % box_z,
+        ]
+    if config["domain"]:
         lines += ["domain_x         = 1", "domain_y         = 1", "domain_z         = 1"]
     return lines
 
 
-def make_input(sysname, ens, dt):
-    cfg = SYSTEMS[sysname]
-    coupling_period = COUPLING_PERIOD_BY_DT[dt]
-    L = []
-    # [INPUT]
-    L.append("[INPUT]")
-    L += cfg["input"]
-    L.append("")
-    # [OUTPUT] (empty: no trajectory/restart output -> fast, no extra divisibility checks)
-    L.append("[OUTPUT]")
-    L.append("")
-    # [ENERGY]
-    L.append("[ENERGY]")
-    L.append("forcefield       = %s" % cfg["ff"])
-    L.append("electrostatic    = PME")
-    L += cfg["energy"]
-    L.append("nonbond_kernel   = GPU")
-    if cfg["energy_water"] is not None:
-        L.append("water_model      = %s" % cfg["energy_water"])
-    L.append("")
-    # [DYNAMICS]
-    L.append("[DYNAMICS]")
-    L.append("integrator       = VVER")
-    L.append("iseed            = 314159")
-    L.append("nsteps           = %d" % BASE_NSTEPS)
-    L.append("timestep         = %s" % DTS[dt])
-    if dt == "4fs" and not cfg.get("hmr_topology", False):
-        L.append("hydrogen_mr      = YES")
-        L.append("hmr_target       = all")
-        L.append("hmr_ratio        = 3.0")
-    L.append("eneout_period    = %d" % BASE_ENEOUT)
-    L.append("nbupdate_period  = %d" % DEFAULT_NBUPDATE_PERIOD)
-    if ens in ("nvt", "npt"):
-        L.append("thermostat_period = %d" % coupling_period)
-    if ens == "npt":
-        L.append("barostat_period  = %d" % coupling_period)
-        L.append("baroscale_period = %d" % coupling_period)
-    L.append("")
-    # [CONSTRAINTS]
-    L.append("[CONSTRAINTS]")
-    L.append("rigid_bond       = YES")
-    L += cfg["constraints_extra"]
-    if dt == "4fs" or cfg.get("hmr_topology", False):
-        L.append("hydrogen_mass_upper_bound = 3.3")
-    L.append("")
-    # [ENSEMBLE]
-    L.append("[ENSEMBLE]")
-    L.append("ensemble         = %s" % ens.upper())
-    L.append("tpcontrol        = %s" % ("NO" if ens == "nve" else "BUSSI"))
-    L.append("temperature      = 300")
-    if ens == "npt":
-        L.append("pressure         = 1.0")
-    L.append("group_tp         = YES")
-    L.append("")
-    # [BOUNDARY]
-    L += boundary_block(cfg, ens)
-    L.append("")
-    return "\n".join(L) + "\n"
+def make_input(system_name, ensemble, time_step):
+    """Return the GENESIS input text for one benchmark cell."""
+    config = SYSTEMS[system_name]
+    coupling_period = COUPLING_PERIOD_BY_TIME_STEP[time_step]
+    lines = []
+
+    lines.append("[INPUT]")
+    lines += config["input"]
+    lines.append("")
+
+    lines.append("[OUTPUT]")
+    lines.append("")
+
+    lines.append("[ENERGY]")
+    lines.append("forcefield       = %s" % config["ff"])
+    lines.append("electrostatic    = PME")
+    lines += config["energy"]
+    lines.append("nonbond_kernel   = GPU")
+    if config["energy_water"] is not None:
+        lines.append("water_model      = %s" % config["energy_water"])
+    lines.append("")
+
+    lines.append("[DYNAMICS]")
+    lines.append("integrator       = VVER")
+    lines.append("iseed            = 314159")
+    lines.append("nsteps           = %d" % BASE_NUM_STEPS)
+    lines.append("timestep         = %s" % TIME_STEPS[time_step])
+    if time_step == "4fs" and not config.get("hmr_topology", False):
+        lines.append("hydrogen_mr      = YES")
+        lines.append("hmr_target       = all")
+        lines.append("hmr_ratio        = 3.0")
+    lines.append("eneout_period    = %d" % BASE_ENEOUT_PERIOD)
+    lines.append("nbupdate_period  = %d" % DEFAULT_NBUPDATE_PERIOD)
+    if ensemble in ("nvt", "npt"):
+        lines.append("thermostat_period = %d" % coupling_period)
+    if ensemble == "npt":
+        lines.append("barostat_period  = %d" % coupling_period)
+        lines.append("baroscale_period = %d" % coupling_period)
+    lines.append("")
+
+    lines.append("[CONSTRAINTS]")
+    lines.append("rigid_bond       = YES")
+    lines += config["constraints_extra"]
+    if time_step == "4fs" or config.get("hmr_topology", False):
+        lines.append("hydrogen_mass_upper_bound = 3.3")
+    lines.append("")
+
+    lines.append("[ENSEMBLE]")
+    lines.append("ensemble         = %s" % ensemble.upper())
+    lines.append("tpcontrol        = %s" % ("NO" if ensemble == "nve" else "BUSSI"))
+    lines.append("temperature      = 300")
+    if ensemble == "npt":
+        lines.append("pressure         = 1.0")
+    lines.append("group_tp         = YES")
+    lines.append("")
+
+    lines += boundary_block(config, ensemble)
+    lines.append("")
+    return "\n".join(lines) + "\n"
 
 
 def main():
-    os.makedirs(OUT, exist_ok=True)
-    n = 0
-    for sysname in SYSTEMS:
-        for ens in ENSEMBLES:
-            for dt in DTS:
-                fname = "%s_%s_%s.inp" % (sysname, ens, dt)
-                with open(os.path.join(OUT, fname), "w") as f:
-                    f.write(make_input(sysname, ens, dt))
-                n += 1
-    print("wrote %d input files to %s" % (n, OUT))
+    """Write all generated input files."""
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    files_written = 0
+    for system_name in SYSTEMS:
+        for ensemble in ENSEMBLES:
+            for time_step in TIME_STEPS:
+                file_name = "%s_%s_%s.inp" % (system_name, ensemble, time_step)
+                output_path = os.path.join(OUTPUT_DIR, file_name)
+                with open(output_path, "w") as input_file:
+                    input_file.write(make_input(system_name, ensemble, time_step))
+                files_written += 1
+    print("wrote %d input files to %s" % (files_written, OUTPUT_DIR))
 
 
 if __name__ == "__main__":

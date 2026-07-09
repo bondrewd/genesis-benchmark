@@ -1,263 +1,176 @@
-# GENESIS spdyn GPU performance benchmark
+# GENESIS GPU Benchmark
 
-Self-contained GPU benchmarking harness for GENESIS `spdyn`. It measures the
-profiler-independent **`[PERFORMANCE]` ns/day** for a matrix of
+This repository contains input templates and Python scripts for benchmarking
+the GENESIS `spdyn` GPU molecular-dynamics implementation.
 
-**8 systems x {NVE, NVT, NPT} x {2 fs, 4 fs} = 48 input files**,
+The benchmark runs a matrix of systems, ensembles, and time steps. For each
+selected cell it can:
 
-each first *tuned* (autotuners on), then *pinned* (tuned values hard-coded,
-autotuners off), then *warmed up* and *measured*.
+1. run a GENESIS autotuning pass,
+2. write a pinned production input,
+3. run warmups,
+4. run repeated production measurements,
+5. save raw logs and a detailed CSV file.
 
-Everything the runs need is inside this directory. Git stores one compressed
-archive per system (`data/<sys>.tgz`); `run_benchmark.py` extracts
-`data/<sys>/` on demand when a selected system directory is missing. The suite
-does not depend on `tests/` or any loose directory in the repo.
+## Requirements
 
----
+- Python 3.10 or newer
+- `mpirun`
+- a GENESIS `spdyn` executable
+- the compressed input archives in `data/*.tgz`
 
-## Directory layout
+The command examples below assume you run them from this repository root.
 
-```
-benchmark/
-  README.md               # this file
-  generate_inputs.py      # regenerates the 48 inputs/ files from per-system templates
-  run_benchmark.py        # the driver: tune -> pin -> warm-up -> measure
-  data/<sys>.tgz          # committed topology + coordinate archive for each system
-  data/<sys>/             # extracted local topology + coordinates (generated, ignored)
-  inputs/<sys>_<ens>_<dt>.inp   # the 48 base inputs (referenced by the driver)
-  results/<timestamp>.csv       # one local CSV per driver run (generated, ignored)
-  results/<timestamp>/           # raw logs for that CSV (generated, ignored)
-    benchmark.log
-    summary.log
-    inputs/<sys>_<ens>_<dt>.tune.inp
-    inputs/<sys>_<ens>_<dt>.pinned.inp
-    autotune/<sys>_<ens>_<dt>_1.log
-    production/<sys>_<ens>_<dt>_1.log
-```
+## Quick Start
 
-### The 8 systems (`<sys>`)
-
-| `<sys>`    | benchmark | force field | source (tests/performance_tests reference) |
-|------------|-----------|-------------|---------------------------------------------|
-| `dhfr`     | DHFR / JAC        | AMBER    | 04/05/06 (`jac_amber`)  |
-| `apoa1`    | ApoA1             | CHARMM   | 01/02/03 (`apoa1`)      |
-| `uun`      | UUN               | CHARMM   | 07/08/09 (`uun`)        |
-| `factorix` | Factor IX         | AMBER    | 25 (NPT; `factorix`)    |
-| `bpti`     | BPTI              | GROAMBER | 16/17/18 (`bpti`)       |
-| `dppc`     | DPPC bilayer      | CHARMM   | 10/11/12 (`dppc`)       |
-| `ake`      | adenylate kinase  | AMBER    | 13/14/15 (`ake`)        |
-| `stmv`     | STMV (~1M atoms)  | AMBER    | loose `STMV_production_NPT_4fs/` |
-
-Force-field / PME / cutoff / box parameters for every cell come from the matching
-reference input above. `factorix` and `stmv` only had NPT references; their NVE and
-NVT variants are derived by dropping the barostat (NPT->NVT) and the thermostat
-(NVT->NVE).
-
-### The 48-cell matrix (`<ens>` x `<dt>`)
-
-* **Ensemble** (`nve` / `nvt` / `npt`), uniform across the matrix so cells are comparable:
-  * `nve` : `tpcontrol = NO`
-  * `nvt` : `tpcontrol = BUSSI`; `thermostat_period = 10` at 2 fs and `5` at 4 fs
-  * `npt` : `tpcontrol = BUSSI`; `thermostat_period`, `barostat_period`, and
-    `baroscale_period` are `10` at 2 fs and `5` at 4 fs; `pressure = 1.0`
-  * all use `group_tp = YES`, `temperature = 300`, fixed `iseed = 314159` for reproducibility.
-* **Timestep** (`2fs` / `4fs`):
-  * `2fs` : `timestep = 0.002`, `rigid_bond = YES`
-  * `4fs` : `timestep = 0.004`, `rigid_bond = YES` **+ hydrogen-mass repartitioning**.
-    Inputs whose topology already contains redistributed HMR masses (Factor IX,
-    STMV) only raise `hydrogen_mass_upper_bound = 3.3` so GENESIS still
-    recognizes those heavier H atoms as hydrogens. Inputs with ordinary hydrogen
-    masses enable GENESIS runtime HMR with `hydrogen_mr = YES`, `hmr_target =
-    all`, and `hmr_ratio = 3.0`, plus the same 3.3 recognition threshold.
-    Because Factor IX and STMV use the same pre-HMR topology in both timestep
-    variants, their 2 fs inputs also set `hydrogen_mass_upper_bound = 3.3`.
-
-The base inputs ship with `nsteps = 100000`, `eneout_period = 1000` (so they run
-stand-alone), and `nbupdate_period = 10`. The driver overrides `nsteps` for
-tuning and measurement runs, uses `eneout_period = 1000` by default, and can
-override `eneout_period`, `nbupdate_period`, and NPT `baroscale_period` from the
-CLI. Both measurement and tuning `nsteps` must be exact multiples of
-`eneout_period`. `[OUTPUT]` is empty, so no
-trajectory/restart files are written.
-
-### Input data archives
-
-The committed input data are the eight per-system archives under `data/`:
-
-```
-data/ake.tgz      data/apoa1.tgz   data/bpti.tgz   data/dhfr.tgz
-data/dppc.tgz     data/factorix.tgz data/stmv.tgz  data/uun.tgz
-```
-
-On a fresh checkout, the first benchmark run for a selected system extracts only
-that system archive while holding the benchmark lock. The uncompressed
-`data/<sys>/` directories are generated files and are ignored by Git. You may
-remove them locally at any time; the next run recreates the directories from the
-archives.
-
-### STMV data (large)
-
-STMV's uncompressed `prmtop` (203 MB) + `inpcrd` (78 MB) are packaged into
-`data/stmv.tgz` (about 48 MB) so the repository can be pushed without a single
-file over 100 MB. STMV is ~1M atoms; expect it to need a large GPU and to be
-very slow. It is **not** part of the quick smoke tests.
-
-If a previous commit already tracked the 203 MB uncompressed `data/stmv/prmtop`,
-GitHub can still reject a push because the large blob remains in history. The
-working tree fix is to track only `data/*.tgz` and untrack `data/<sys>/`, but an
-already-published or already-created history may also need to be rewritten
-(`git filter-repo`, an orphan branch, or Git LFS) before pushing to GitHub.
-
----
-
-## Measurement protocol (per selected `system x ensemble x dt` cell)
-
-`run_benchmark.py` executes, for each cell:
-
-1. **TUNE** — run once with the requested autotuners ON, then parse the
-   `[AUTOTUNE]` report to extract the tuned values:
-   * kernel block sizes (the `kernel_*` paste-ready lines),
-   * `cell_size` (the `Selected configuration: cell_size = X` line),
-   * `pairlistdist` + `nbupdate_period` (the neighbor-list candidate marked `(selected)`).
-   Manual `--nbupdate-period` is rejected with `--tune nblist`, because
-   `pairlistdist` and `nbupdate_period` are selected as a coupled pair.
-2. **PIN** — write a *fresh* input that hard-codes the tuned values
-   (`kernel_*` into `[GPU]`, `cell_size` + `pairlistdist` into `[ENERGY]`,
-   `nbupdate_period` into `[DYNAMICS]`) and turns **all** autotuners OFF, so the
-   measured runs carry no autotune instrumentation.
-3. **WARM-UP** — run the pinned input `--warmup` times (default 2), timings discarded
-   (heat the GPU / stabilise clocks).
-4. **MEASURE** — run the pinned input `--measure` times (default 10), collect the
-   `[PERFORMANCE]` ns/day of each.
-5. Report **mean, median, std, and cv%** and append one row per measured run to
-   `results/<timestamp>.csv` after each completed cell.
-
-Every `spdyn` launch is
-```
-GENESIS_GPU_PROFILE=0 OMP_NUM_THREADS=<omp-threads> HWLOC_COMPONENTS=x86 \
-    mpirun -np <mpi-procs> <repo>/src/spdyn_singlempi/spdyn <input>
-```
-run from the benchmark root, with defaults `--mpi-procs 1` and
-`--omp-threads 1`. The ns/day is read from the `[PERFORMANCE]` line
-(GPU-synced, profiler-independent). Runs are **serialised through an advisory
-lockfile** (`/tmp/bench.lock`) so concurrent agents never benchmark at the same
-time. The lock file itself may remain on disk; this is harmless because the
-lock is owned by the live process, not by file existence.
-
----
-
-## CLI
-
-```
-python3 run_benchmark.py [options]
-
---systems   dhfr,apoa1,...   (default: all 8)
---ensembles nve,nvt,npt      (default: all 3)
---dt        2,4              (default: both, fs)
---warmup    N                (default 2)   discarded warm-up runs
---measure   M                (default 10)  timed runs
---tune      kernel|cell|nblist|all|none  (default: kernel)   comma-list allowed
---full-autotune              shortcut for --tune kernel,cell,nblist
---nsteps        N            (default 100000) measurement-run nsteps
---tune-nsteps   N            (default 50000) tuning-run nsteps
---eneout-period N            (default 1000) DYNAMICS eneout_period; nsteps must be multiples
---mpi-procs     N            (default 1) MPI process count for each spdyn launch
---omp-threads   N            (default 1) OMP_NUM_THREADS for each spdyn launch
---nbupdate-period N          DYNAMICS nbupdate_period override (default: input value, 10 in generated inputs)
---baroscale-period N         NPT DYNAMICS baroscale_period override (default: input value)
---timeout    S               (default 7200)  per-run timeout
---lock       PATH            (default /tmp/bench.lock)
---allow-failures             write partial CSV and exit 0 even if cells fail
---timestamp  STR             CSV name stamp (default: local date-time)
---out        PATH            explicit CSV path (overrides --timestamp)
-```
-
-### Examples
+Run one small benchmark:
 
 ```bash
-# Quick end-to-end check on two fast cells (what was used to validate this harness):
-python3 run_benchmark.py --systems dhfr,apoa1 --ensembles nve,nvt --dt 2,4 \
-    --tune kernel --warmup 1 --measure 3 --nsteps 2000 --tune-nsteps 3000
-
-# The default kernel-only tune, all 8 systems, full 10-sample measurement:
-python3 run_benchmark.py
-
-# Turn on all three autotuners (see the caveat below):
-python3 run_benchmark.py --systems ake,dppc --full-autotune
-
-# Neighbor-list tuning only, NVT/NPT only:
-python3 run_benchmark.py --tune nblist --ensembles nvt,npt
+python run_benchmark.py \
+  --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn \
+  --systems dhfr \
+  --ensembles nve \
+  --dt 2 \
+  --warmup 1 \
+  --measure 3
 ```
 
-### Regenerating the 48 inputs
+Run the default benchmark matrix:
 
 ```bash
-python3 generate_inputs.py     # rewrites inputs/*.inp from the per-system templates
+python run_benchmark.py --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn
 ```
 
----
+The default run uses:
 
-## Autotuner caveat (important)
+- all systems: `dhfr,apoa1,uun,factorix,bpti,dppc,ake,stmv`
+- all ensembles: `nve,nvt,npt`
+- both time steps: `2fs,4fs`
+- kernel autotuning
+- `100000` production steps
+- `50000` autotuning steps
+- `eneout_period = 1000`
+- `1` MPI process
+- `1` OpenMP thread
 
-The **default is `--tune kernel`**, and kernel-block-size autotuning is robust on
-every system tested — it never re-decomposes the cell grid.
+## Common Examples
 
-The **`cell` and `nblist` autotuners re-decompose the cell grid at runtime**, and in
-the current build that path is fragile:
+Run only DHFR NVE at both 2 fs and 4 fs:
 
-* On systems whose `[BOUNDARY]` specifies a `box_size` (e.g. `dhfr`, `apoa1`) the
-  re-decomposition can abort with a GENESIS **cell-overflow**
-  (`gpu_domain.cu: cell too large ... exceeds the 256 per-cell capacity`).
-* `cell_size_autotune` frequently reports a degenerate `cell_grid = 0 x 0 x 0`
-  (the golden-section search does not actually evaluate), i.e. it pins the default.
-* On no-`box_size` systems (`ake`, `dppc`) `nblist` tuning works and selects a real
-  `pairlistdist`.
+```bash
+python run_benchmark.py \
+  --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn \
+  --systems dhfr \
+  --ensembles nve \
+  --dt 2,4
+```
 
-This is a GENESIS-side limitation, not a harness bug. The driver handles the
-known `cell`/`nblist` re-decomposition overflow gracefully: **if that specific
-cell-overflow abort occurs, the cell falls back to a default-pinned measurement**
-(all autotuners off, no pinned values) so you still get a valid ns/day, and the
-CSV/table `note` column records `tune-failed(cell overflow)`. Other tuning
-failures, including kernel-only tuning failures, fail the selected cell. For
-dependable end-to-end numbers, use the default `--tune kernel`.
+Use shorter runs for a smoke test:
 
----
+```bash
+python run_benchmark.py \
+  --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn \
+  --systems dhfr \
+  --ensembles nve \
+  --dt 2 \
+  --warmup 0 \
+  --measure 1 \
+  --nsteps 1000 \
+  --tune-nsteps 1000
+```
+
+Set MPI and OpenMP parallelism:
+
+```bash
+python run_benchmark.py \
+  --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn \
+  --systems dhfr \
+  --mpi-procs 1 \
+  --omp-threads 1
+```
+
+Override the energy-output period:
+
+```bash
+python run_benchmark.py \
+  --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn \
+  --systems dhfr \
+  --nsteps 20000 \
+  --tune-nsteps 10000 \
+  --eneout-period 1000
+```
+
+Both `--nsteps` and `--tune-nsteps` must be exact multiples of
+`--eneout-period`.
 
 ## Output
 
-Console prints a table:
+Each benchmark creates:
 
+```text
+results/<timestamp>.csv
+results/<timestamp>/
+  benchmark.log
+  summary.log
+  inputs/
+  autotune/
+  production/
 ```
+
+`benchmark.log` contains the full progress log.
+
+`summary.log` contains only the final table:
+
+```text
+=== ns/day (mean/median +- std, cv%) : tuners=kernel, measure=10, nsteps=100000 ===
 system     ens   dt           mean       median      +-std     cv%  note
-dhfr       nve   2fs        702.45       702.47       0.55    0.1%
-apoa1      nve   2fs        135.57       135.55       0.20    0.1%
+----------------------------------------------------------------------------------
+dhfr       nve   2fs        662.52       662.47       0.89    0.1%
 ```
 
-For a CSV named `results/<timestamp>.csv`, the driver also creates
-`results/<timestamp>/` with:
+The CSV contains one row per measured production run. It includes the run ID,
+the performance value, aggregate statistics, atom count, tuned kernel values,
+input options, and paths to the raw GENESIS logs.
 
-* `benchmark.log` — the full benchmark progress log printed by the driver.
-* `summary.log` — only the final aggregate ns/day table.
-* `inputs/<sys>_<ens>_<dt>.tune.inp` and
-  `inputs/<sys>_<ens>_<dt>.pinned.inp` — the exact generated GENESIS inputs used
-  for that result bundle.
-* `autotune/<sys>_<ens>_<dt>_1.log` — raw GENESIS stdout/stderr from the tuning
-  phase for each tuned cell.
-* `production/<sys>_<ens>_<dt>_<run_id>.log` — raw GENESIS stdout/stderr for
-  each measured production run. Warmups are also preserved as
-  `production/<sys>_<ens>_<dt>_warmup_<id>.log`.
+## Input Data
 
-`results/<timestamp>.csv` now stores one row per measured production run. Fixed
-columns include:
-`system, ensemble, dt, run_id, ns_per_day, wall_seconds, ns_per_day_mean,
-ns_per_day_median, ns_per_day_std, cv_pct, n_measure, mpi_procs, omp_threads,
-num_atoms, nbupdate_period, baroscale_period, tuners, note, autotune_log,
-production_log, tuned_cell_size, tuned_pairlistdist, tuned_nbupdate_period,
-tuned_kernel_*, input_options_json`.
+The repository stores input data as compressed archives:
 
-The remaining `input_<section>_<parameter>` columns are generated from the
-pinned input used for measurement, so each CSV row contains the actual GENESIS
-control parameters that produced the performance value.
+```text
+data/<system>.tgz
+```
 
-A high `cv%` flags an unstable measurement (thermal throttling or contention on
-the shared machine) — re-run that cell when the machine is quiet.
+When a selected system is missing from `data/<system>/`, the benchmark extracts
+the archive automatically while holding the benchmark lock.
+
+The extracted directories and benchmark outputs are generated files and are not
+committed:
+
+```text
+data/<system>/
+results/
+```
+
+## Regenerate Inputs
+
+The checked-in input files live in `inputs/`. Regenerate them with:
+
+```bash
+python generate_inputs.py
+```
+
+The generated input matrix covers:
+
+- systems: `dhfr, apoa1, uun, factorix, bpti, dppc, ake, stmv`
+- ensembles: `nve, nvt, npt`
+- time steps: `2fs, 4fs`
+
+## Notes
+
+- Benchmark runs are serialized with an advisory lock at `/tmp/bench.lock`.
+- The lock file may remain on disk; only a live process holding the lock blocks
+  another benchmark.
+- The default autotuner is `kernel`, which is the stable option for the current
+  benchmark driver.
+- `data/stmv.tgz` is compressed so no single tracked file is larger than
+  GitHub's 100 MB file limit.

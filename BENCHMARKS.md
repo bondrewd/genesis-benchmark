@@ -207,3 +207,24 @@ Result: completed without failures. Both
 ```text
 dhfr,nve,2fs,mean=201.820,median=201.820,std=0.000,cv=0.00,n=1,raw=201.820
 ```
+
+## 2026-07-09 13:09 JST - code audit smoke check
+
+Repository commit: `8a72c94` (`genesis-benchmark`, dirty with this change).
+Scope: functional check after renaming Python variables and simplifying comments.
+This is a 10-step smoke test, not a performance baseline.
+
+Command:
+
+```bash
+python3 run_benchmark.py --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn --systems dhfr --ensembles nve --dt 2 --tune kernel --warmup 0 --measure 1 --nsteps 10 --tune-nsteps 10 --eneout-period 10 --timeout 120 --timestamp audit-smoke
+```
+
+Result: completed without failures. The CSV contains one measured row with
+`input_dynamics_nsteps=10` and `input_dynamics_eneout_period=10`; `summary.log`
+contains only the aggregate table and `benchmark.log` contains the full progress
+log.
+
+```text
+dhfr,nve,2fs,mean=205.500,median=205.500,std=0.000,cv=0.00,n=1,raw=205.500
+```
