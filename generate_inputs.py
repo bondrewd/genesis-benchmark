@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate the GENESIS benchmark input matrix.
 
-The matrix contains 8 systems, 3 ensembles, and 2 time steps. Each generated
+The matrix contains 10 systems, 3 ensembles, and 2 time steps. Each generated
 input uses paths relative to the benchmark repository root because the benchmark
 driver launches GENESIS from that directory.
 """
@@ -13,12 +13,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(HERE, "inputs")
 
 SYSTEMS = {
-    "dhfr": dict(
-        ff="AMBER",
+    "dhfr_27k": dict(
+        forcefield="AMBER",
         input=[
-            "prmtopfile = data/dhfr/step3_input.parm7",
-            "ambcrdfile = data/dhfr/step3_input.rst7",
-            "rstfile    = data/dhfr/equil.rst",
+            "prmtopfile = data/dhfr_27k/step3_input.parm7",
+            "ambcrdfile = data/dhfr_27k/step3_input.rst7",
+            "rstfile    = data/dhfr_27k/equil.rst",
         ],
         energy=[
             "switchdist       = 8",
@@ -35,8 +35,29 @@ SYSTEMS = {
         domain=False,
         npt_drops_box=False,
     ),
+    "dhfr_23k": dict(
+        forcefield="AMBER",
+        input=[
+            "prmtopfile = data/dhfr_23k/prmtop",
+            "ambcrdfile = data/dhfr_23k/inpcrd",
+        ],
+        energy=[
+            "switchdist       = 8",
+            "cutoffdist       = 8",
+            "pairlistdist     = 9.5",
+            "pme_ngrid_x      = 48",
+            "pme_ngrid_y      = 48",
+            "pme_ngrid_z      = 48",
+            "pme_nspline      = 4",
+        ],
+        energy_water=None,
+        constraints_extra=["water_model      = WAT"],
+        box=("62.23", "62.23", "62.23"),
+        domain=False,
+        npt_drops_box=False,
+    ),
     "apoa1": dict(
-        ff="CHARMM",
+        forcefield="CHARMM",
         input=[
             "topfile = data/apoa1/top_all27_prot_lipid.rtf",
             "parfile = data/apoa1/par_all27_prot_lipid.prm",
@@ -61,7 +82,7 @@ SYSTEMS = {
         npt_drops_box=True,
     ),
     "uun": dict(
-        ff="CHARMM",
+        forcefield="CHARMM",
         input=[
             "topfile = data/uun/toppar/top_all36_prot.rtf,\\",
             "data/uun/toppar/top_all36_na.rtf,\\",
@@ -94,7 +115,7 @@ SYSTEMS = {
         npt_drops_box=False,
     ),
     "factorix": dict(
-        ff="AMBER",
+        forcefield="AMBER",
         input=[
             "prmtopfile = data/factorix/FactorIX.prmtop",
             "ambcrdfile = data/factorix/FactorIX.inpcrd",
@@ -114,7 +135,7 @@ SYSTEMS = {
         hmr_topology=True,
     ),
     "bpti": dict(
-        ff="GROAMBER",
+        forcefield="GROAMBER",
         input=[
             "grotopfile = data/bpti/bpti.top",
             "grocrdfile = data/bpti/bpti.gro",
@@ -138,7 +159,7 @@ SYSTEMS = {
         npt_drops_box=False,
     ),
     "dppc": dict(
-        ff="CHARMM",
+        forcefield="CHARMM",
         input=[
             "topfile          = data/dppc/top_all36_lipid.rtf",
             "parfile          = data/dppc/par_all36_lipid.prm",
@@ -165,7 +186,7 @@ SYSTEMS = {
         npt_drops_box=False,
     ),
     "ake": dict(
-        ff="AMBER",
+        forcefield="AMBER",
         input=[
             "prmtopfile       = data/ake/ake.top",
             "ambcrdfile       = data/ake/ake.rst",
@@ -190,7 +211,7 @@ SYSTEMS = {
         npt_drops_box=False,
     ),
     "stmv": dict(
-        ff="AMBER",
+        forcefield="AMBER",
         input=[
             "prmtopfile = data/stmv/prmtop",
             "ambcrdfile = data/stmv/inpcrd",
@@ -207,6 +228,24 @@ SYSTEMS = {
         domain=False,
         npt_drops_box=False,
         hmr_topology=True,
+    ),
+    "cellulose": dict(
+        forcefield="AMBER",
+        input=[
+            "prmtopfile = data/cellulose/prmtop",
+            "ambcrdfile = data/cellulose/inpcrd",
+        ],
+        energy=[
+            "switchdist       = 8",
+            "cutoffdist       = 8",
+            "pairlistdist     = 9.5",
+            "pme_nspline      = 4",
+        ],
+        energy_water=None,
+        constraints_extra=["water_model      = WAT"],
+        box=("259.2299548", "124.5580494", "123.5021394"),
+        domain=False,
+        npt_drops_box=False,
     ),
 }
 
@@ -247,7 +286,7 @@ def make_input(system_name, ensemble, time_step):
     lines.append("")
 
     lines.append("[ENERGY]")
-    lines.append("forcefield       = %s" % config["ff"])
+    lines.append("forcefield       = %s" % config["forcefield"])
     lines.append("electrostatic    = PME")
     lines += config["energy"]
     lines.append("nonbond_kernel   = GPU")
@@ -260,7 +299,8 @@ def make_input(system_name, ensemble, time_step):
     lines.append("iseed            = 314159")
     lines.append("nsteps           = %d" % BASE_NUM_STEPS)
     lines.append("timestep         = %s" % TIME_STEPS[time_step])
-    if time_step == "4fs" and not config.get("hmr_topology", False):
+    has_hmr_topology = config.get("hmr_topology", False)
+    if time_step == "4fs" and not has_hmr_topology:
         lines.append("hydrogen_mr      = YES")
         lines.append("hmr_target       = all")
         lines.append("hmr_ratio        = 3.0")
@@ -276,7 +316,7 @@ def make_input(system_name, ensemble, time_step):
     lines.append("[CONSTRAINTS]")
     lines.append("rigid_bond       = YES")
     lines += config["constraints_extra"]
-    if time_step == "4fs" or config.get("hmr_topology", False):
+    if time_step == "4fs" or has_hmr_topology:
         lines.append("hydrogen_mass_upper_bound = 3.3")
     lines.append("")
 
@@ -291,7 +331,7 @@ def make_input(system_name, ensemble, time_step):
 
     lines += boundary_block(config, ensemble)
     lines.append("")
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def main():

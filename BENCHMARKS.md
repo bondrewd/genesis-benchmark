@@ -1,5 +1,8 @@
 # Benchmarks
 
+Historical entries that use the system name `dhfr` refer to the current
+`dhfr_27k` dataset.
+
 ## 2026-07-08 19:18 JST - DHFR 4 fs benchmark-driver fix
 
 Repository commit: `b70d450` (`genesis-benchmark`, dirty with this change).
@@ -227,4 +230,50 @@ log.
 
 ```text
 dhfr,nve,2fs,mean=205.500,median=205.500,std=0.000,cv=0.00,n=1,raw=205.500
+```
+
+## 2026-07-09 14:10 JST - Amber PME import smoke checks
+
+Repository commit: `2940e00` (`genesis-benchmark`, dirty with this change).
+Host: `legion`; GPU: NVIDIA GeForce RTX 5070 Ti Laptop GPU, driver 595.71.05.
+Scope: functional smoke checks for the Amber PME additions and the DHFR rename.
+These are 10-step checks with no autotune, not performance baselines.
+
+Commands:
+
+```bash
+python3 run_benchmark.py --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn --systems dhfr_23k --ensembles nve,nvt,npt --dt 2,4 --tune none --warmup 0 --measure 1 --nsteps 10 --tune-nsteps 10 --eneout-period 10 --timeout 300 --timestamp pme-dhfr23-runtime-hmr-smoke
+
+python3 run_benchmark.py --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn --systems cellulose --ensembles nve,npt --dt 2,4 --tune none --warmup 0 --measure 1 --nsteps 10 --tune-nsteps 10 --eneout-period 10 --timeout 600 --timestamp pme-cellulose-smoke
+
+python3 run_benchmark.py --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn --systems cellulose --ensembles npt --dt 2,4 --tune none --warmup 0 --measure 1 --nsteps 10 --tune-nsteps 10 --eneout-period 10 --timeout 600 --timestamp pme-cellulose-npt-smoke2
+
+python3 run_benchmark.py --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn --systems cellulose --ensembles nvt --dt 2,4 --tune none --warmup 0 --measure 1 --nsteps 10 --tune-nsteps 10 --eneout-period 10 --timeout 600 --timestamp pme-cellulose-nvt-smoke
+
+python3 run_benchmark.py --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn --systems dhfr_27k --ensembles nve --dt 2 --tune none --warmup 0 --measure 1 --nsteps 10 --tune-nsteps 10 --eneout-period 10 --timeout 300 --timestamp pme-dhfr27-rename-smoke
+```
+
+Results: all final smoke checks completed without failures. Amber's old-format
+JAC 2 fs topology failed before conversion to modern Amber topology format, so
+`data/dhfr_23k/prmtop` was converted with ParmEd while preserving 1.008 amu
+hydrogen masses. DHFR 23k uses that normal-mass topology for both 2 fs and 4 fs;
+the 4 fs inputs use GENESIS runtime HMR.
+The first cellulose smoke run passed NVE but failed NPT without explicit
+`box_size_*` values; `pme-cellulose-npt-smoke2` supersedes those failed NPT
+cells after adding the cellulose box dimensions to the generated NPT inputs.
+
+```text
+dhfr_23k,nve,2fs,atoms=23558,raw=98.270
+dhfr_23k,nve,4fs,atoms=23558,raw=187.850
+dhfr_23k,nvt,2fs,atoms=23558,raw=98.590
+dhfr_23k,nvt,4fs,atoms=23558,raw=195.290
+dhfr_23k,npt,2fs,atoms=23558,raw=97.590
+dhfr_23k,npt,4fs,atoms=23558,raw=189.050
+cellulose,nve,2fs,atoms=408609,raw=7.080
+cellulose,nve,4fs,atoms=408609,raw=14.040
+cellulose,npt,2fs,atoms=408609,raw=6.790
+cellulose,npt,4fs,atoms=408609,raw=13.330
+cellulose,nvt,2fs,atoms=408609,raw=6.750
+cellulose,nvt,4fs,atoms=408609,raw=13.960
+dhfr_27k,nve,2fs,atoms=27346,raw=206.680
 ```

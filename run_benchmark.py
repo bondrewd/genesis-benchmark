@@ -31,7 +31,18 @@ INPUTS = os.path.join(HERE, "inputs")
 RESULTS = os.path.join(HERE, "results")
 SPDYN = os.path.normpath(os.path.join(HERE, "..", "src", "spdyn_singlempi", "spdyn"))
 
-ALL_SYSTEMS = ["dhfr", "apoa1", "uun", "factorix", "bpti", "dppc", "ake", "stmv"]
+ALL_SYSTEMS = [
+    "dhfr_27k",
+    "dhfr_23k",
+    "apoa1",
+    "uun",
+    "factorix",
+    "bpti",
+    "dppc",
+    "ake",
+    "stmv",
+    "cellulose",
+]
 ALL_ENSEMBLES = ["nve", "nvt", "npt"]
 ALL_TIME_STEPS = ["2fs", "4fs"]
 ARCHIVE_SENTINEL = ".archive_sha256"
@@ -629,12 +640,14 @@ def summary_table_lines(results, tune_set, measure_count, num_steps):
         "-" * 82,
     ]
     for result in results:
-        lines.append("%-10s %-5s %-4s %12.2f %12.2f %10.2f %6.1f%%  %s" %
-                     (
-                         result["system"], result["ensemble"], result["dt"],
-                         result["mean"], result["median"], result["std"],
-                         result["cv"], result.get("note", ""),
-                     ))
+        lines.append(
+            "%-10s %-5s %-4s %12.2f %12.2f %10.2f %6.1f%%  %s" %
+            (
+                result["system"], result["ensemble"], result["dt"],
+                result["mean"], result["median"], result["stddev"],
+                result["cv_percent"], result.get("note", ""),
+            )
+        )
     return lines
 
 
@@ -790,9 +803,9 @@ def run_cell(system_name, ensemble, time_step, args):
         dt=time_step,
         mean=mean_value,
         median=median_value,
-        std=std_value,
-        cv=cv_value,
-        n=len(performance_values),
+        stddev=std_value,
+        cv_percent=cv_value,
+        measure_count=len(performance_values),
         runs=runs,
         tuned=tuned_values,
         note=note,
@@ -861,9 +874,9 @@ def result_csv_rows(result, tune_set, input_columns):
         "dt": result["dt"],
         "ns_per_day_mean": "%.3f" % result["mean"],
         "ns_per_day_median": "%.3f" % result["median"],
-        "ns_per_day_std": "%.3f" % result["std"],
-        "cv_pct": "%.2f" % result["cv"],
-        "n_measure": result["n"],
+        "ns_per_day_std": "%.3f" % result["stddev"],
+        "cv_pct": "%.2f" % result["cv_percent"],
+        "n_measure": result["measure_count"],
         "mpi_procs": result["mpi_procs"],
         "omp_threads": result["omp_threads"],
         "num_atoms": result["num_atoms"] or "",
@@ -914,7 +927,7 @@ def build_parser():
     """Build the command-line parser."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--systems", dest="systems_text", metavar="SYSTEMS", default=",".join(ALL_SYSTEMS),
-                        help="comma list; default all 8: " + ",".join(ALL_SYSTEMS))
+                        help="comma list; default all %d: %s" % (len(ALL_SYSTEMS), ",".join(ALL_SYSTEMS)))
     parser.add_argument("--ensembles", dest="ensembles_text", metavar="ENSEMBLES", default=",".join(ALL_ENSEMBLES),
                         help="nve,nvt,npt")
     parser.add_argument("--dt", dest="time_steps_text", metavar="DT", default="2,4",

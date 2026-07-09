@@ -47,4 +47,3 @@ type             = PBC
 domain_x         = 1
 domain_y         = 1
 domain_z         = 1
-

@@ -39,4 +39,3 @@ group_tp         = YES
 
 [BOUNDARY]
 type             = PBC
-

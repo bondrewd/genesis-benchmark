@@ -28,7 +28,7 @@ Run one small benchmark:
 ```bash
 python run_benchmark.py \
   --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn \
-  --systems dhfr \
+  --systems dhfr_27k \
   --ensembles nve \
   --dt 2 \
   --warmup 1 \
@@ -43,7 +43,7 @@ python run_benchmark.py --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn
 
 The default run uses:
 
-- all systems: `dhfr,apoa1,uun,factorix,bpti,dppc,ake,stmv`
+- all systems: `dhfr_27k,dhfr_23k,apoa1,uun,factorix,bpti,dppc,ake,stmv,cellulose`
 - all ensembles: `nve,nvt,npt`
 - both time steps: `2fs,4fs`
 - kernel autotuning
@@ -55,14 +55,24 @@ The default run uses:
 
 ## Common Examples
 
-Run only DHFR NVE at both 2 fs and 4 fs:
+Run only the original 27k-atom DHFR NVE at both 2 fs and 4 fs:
 
 ```bash
 python run_benchmark.py \
   --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn \
-  --systems dhfr \
+  --systems dhfr_27k \
   --ensembles nve \
   --dt 2,4
+```
+
+Run Amber's 23k-atom DHFR and cellulose systems:
+
+```bash
+python run_benchmark.py \
+  --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn \
+  --systems dhfr_23k,cellulose \
+  --ensembles nve \
+  --dt 2
 ```
 
 Use shorter runs for a smoke test:
@@ -70,7 +80,7 @@ Use shorter runs for a smoke test:
 ```bash
 python run_benchmark.py \
   --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn \
-  --systems dhfr \
+  --systems dhfr_27k \
   --ensembles nve \
   --dt 2 \
   --warmup 0 \
@@ -84,7 +94,7 @@ Set MPI and OpenMP parallelism:
 ```bash
 python run_benchmark.py \
   --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn \
-  --systems dhfr \
+  --systems dhfr_27k \
   --mpi-procs 1 \
   --omp-threads 1
 ```
@@ -94,7 +104,7 @@ Override the energy-output period:
 ```bash
 python run_benchmark.py \
   --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn \
-  --systems dhfr \
+  --systems dhfr_27k \
   --nsteps 20000 \
   --tune-nsteps 10000 \
   --eneout-period 1000
@@ -125,7 +135,7 @@ results/<timestamp>/
 === ns/day (mean/median +- std, cv%) : tuners=kernel, measure=10, nsteps=100000 ===
 system     ens   dt           mean       median      +-std     cv%  note
 ----------------------------------------------------------------------------------
-dhfr       nve   2fs        662.52       662.47       0.89    0.1%
+dhfr_27k   nve   2fs        662.52       662.47       0.89    0.1%
 ```
 
 The CSV contains one row per measured production run. It includes the run ID,
@@ -161,7 +171,7 @@ python generate_inputs.py
 
 The generated input matrix covers:
 
-- systems: `dhfr, apoa1, uun, factorix, bpti, dppc, ake, stmv`
+- systems: `dhfr_27k, dhfr_23k, apoa1, uun, factorix, bpti, dppc, ake, stmv, cellulose`
 - ensembles: `nve, nvt, npt`
 - time steps: `2fs, 4fs`
 
@@ -172,5 +182,12 @@ The generated input matrix covers:
   another benchmark.
 - The default autotuner is `kernel`, which is the stable option for the current
   benchmark driver.
+- The original DHFR system is named `dhfr_27k`; Amber's PME DHFR system is
+  named `dhfr_23k`.
+- Normal 1.008 amu hydrogen topologies are used for 2 fs and can use GENESIS
+  runtime HMR for 4 fs. Topologies that already contain 3.024 amu hydrogens are
+  treated as HMR-only inputs; those inputs set `hydrogen_mass_upper_bound = 3.3`
+  and do not use the `hydrogen_mr`, `hmr_target`, or `hmr_ratio` runtime-scaling
+  options.
 - `data/stmv.tgz` is compressed so no single tracked file is larger than
   GitHub's 100 MB file limit.
