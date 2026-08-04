@@ -489,10 +489,9 @@ def run_spdyn(input_path, timeout_seconds, mpi_procs, omp_threads, log_path=None
 
 
 def build_run_input(base_text, num_steps, eneout_period, baroscale_period):
-    """Return a measurement input with kernel autotuning disabled."""
+    """Return a measurement input without adding GPU parameters."""
     blocks = split_sections(base_text)
     set_run_window(blocks, num_steps, eneout_period)
-    set_parameter(blocks, "GPU", "kernel_autotune", "NO")
     set_baroscale_override(blocks, baroscale_period)
     return join_sections(blocks)
 
