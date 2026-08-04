@@ -6,11 +6,10 @@ the GENESIS `spdyn` GPU molecular-dynamics implementation.
 The benchmark runs a matrix of systems, ensembles, and time steps. For each
 selected cell it can:
 
-1. run a GENESIS autotuning pass,
-2. write a pinned production input,
-3. run warmups,
-4. run repeated production measurements,
-5. save raw logs and a detailed CSV file.
+1. write a production input with kernel autotuning disabled,
+2. run warmups,
+3. run repeated production measurements,
+4. save raw logs and a detailed CSV file.
 
 ## Requirements
 
@@ -46,9 +45,7 @@ The default run uses:
 - all systems: `dhfr,apoa1,uun,factorix,bpti,dppc,ake,stmv,cellulose`
 - all ensembles: `nve,nvt,npt`
 - both time steps: `2fs,4fs` for every system
-- kernel autotuning
 - `100000` production steps
-- `50000` autotuning steps
 - `eneout_period = 1000`
 - `1` MPI process
 - `1` OpenMP thread
@@ -85,8 +82,7 @@ python run_benchmark.py \
   --dt 2 \
   --warmup 0 \
   --measure 1 \
-  --nsteps 1000 \
-  --tune-nsteps 1000
+  --nsteps 1000
 ```
 
 Set MPI and OpenMP parallelism:
@@ -106,12 +102,10 @@ python run_benchmark.py \
   --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn \
   --systems dhfr \
   --nsteps 20000 \
-  --tune-nsteps 10000 \
   --eneout-period 1000
 ```
 
-Both `--nsteps` and `--tune-nsteps` must be exact multiples of
-`--eneout-period`.
+`--nsteps` must be an exact multiple of `--eneout-period`.
 
 ## Output
 
@@ -123,7 +117,6 @@ results/<timestamp>/
   benchmark.log
   summary.log
   inputs/
-  autotune/
   production/
 ```
 
@@ -132,14 +125,14 @@ results/<timestamp>/
 `summary.log` contains only the final table:
 
 ```text
-=== ns/day (mean/median +- std, cv%) : tuners=kernel, measure=10, nsteps=100000 ===
+=== ns/day (mean/median +- std, cv%) : measure=10, nsteps=100000 ===
 system     ens   dt           mean       median      +-std     cv%  note
 ----------------------------------------------------------------------------------
 ```
 
 The CSV contains one row per measured production run. It includes the run ID,
-the performance value, aggregate statistics, atom count, tuned kernel values,
-input options, and paths to the raw GENESIS logs.
+the performance value, aggregate statistics, atom count, input options, and
+paths to the raw GENESIS logs.
 
 ## Input Data
 
@@ -179,16 +172,17 @@ The generated input matrix covers 54 benchmark cells:
 - Benchmark runs are serialized with an advisory lock at `/tmp/bench.lock`.
 - The lock file may remain on disk; only a live process holding the lock blocks
   another benchmark.
-- The default autotuner is `kernel`, which is the stable option for the current
-  benchmark driver.
+- The benchmark driver does not run autotuning. Its generated run input sets
+  `kernel_autotune = NO` explicitly.
 - `dhfr` is the standard AMBER JAC PME benchmark system with 23,558 atoms. The
   current AMBER suite publishes it as `PME/Topologies/JAC.prmtop` and
   `PME/Coordinates/JAC.inpcrd` in the
   [AMBER20 benchmark suite](https://ambermd.org/Amber20_Benchmark_Suite.tar.gz).
   `data/dhfr.tgz` retains the normal-mass, GENESIS-compatible conversion used
   for the 2 fs input; the 4 fs input applies GENESIS runtime HMR.
-- Every rigid system explicitly selects `cons_scheme = MSHAKE` with
-  `iter_solute = 3` and `iter_water = 3`.
+- Every rigid system explicitly selects `cons_scheme = MSHAKE-SETTLE`, using
+  `iter_solute = 2` for the solute and SETTLE for water without an
+  `iter_water` setting.
 - Every topology uses normal 1.008 amu hydrogen masses. The 2 fs inputs retain
   those masses, while every 4 fs input enables GENESIS runtime HMR with
   `hmr_target = all`, `hmr_ratio = 3.0`, and

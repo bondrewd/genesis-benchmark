@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Run GENESIS spdyn GPU benchmarks.
 
-For each selected system, ensemble, and time step, the driver runs an optional
-autotuning pass, writes a pinned input, warms up, measures production runs, and
-records raw logs plus a row-per-run CSV.
+For each selected system, ensemble, and time step, the driver writes a run
+input, warms up, measures production runs, and records raw logs plus a
+row-per-run CSV.
 """
 
 import argparse
@@ -45,17 +45,6 @@ ALL_SYSTEMS = [
 ALL_ENSEMBLES = ["nve", "nvt", "npt"]
 ALL_TIME_STEPS = ["2fs", "4fs"]
 ARCHIVE_SENTINEL = ".archive_sha256"
-KERNEL_KEYS = [
-    "kernel_pme_spread_block",
-    "kernel_pme_reciprocal_prefactor_block",
-    "kernel_bonded_block",
-    "kernel_constraints_block",
-    "kernel_nonbond_inter_minblocks",
-    "kernel_nonbond_intra_minblocks",
-    "kernel_special_block",
-    "kernel_integrator_group_block",
-]
-
 PERFORMANCE_RE = re.compile(r"\[PERFORMANCE\]\s*(?:performance:\s*)?([0-9.]+)\s*ns/day")
 NUM_ATOMS_PATTERNS = [
     re.compile(r"^\s*num_atoms\s*=\s*([0-9]+)\b", re.IGNORECASE | re.MULTILINE),
@@ -207,23 +196,6 @@ def set_baroscale_override(blocks, baroscale_period):
         set_parameter(blocks, "DYNAMICS", "baroscale_period", baroscale_period)
 
 
-def parse_autotune_report(text):
-    """Extract tuned kernel values from a GENESIS autotune report."""
-    tuned_values = {}
-
-    kernel_values = {}
-    for raw_line in text.splitlines():
-        kernel_match = re.match(r"\s*(kernel_\w+)\s*=\s*([0-9]+)", raw_line)
-        if kernel_match and kernel_match.group(1) in KERNEL_KEYS:
-            kernel_values[kernel_match.group(1)] = int(kernel_match.group(2))
-        schedule_match = re.match(r"\s*pme_schedule\s*=\s*([A-Za-z_]+)", raw_line)
-        if schedule_match:
-            tuned_values["pme_schedule"] = schedule_match.group(1)
-    if kernel_values:
-        tuned_values["kernel"] = kernel_values
-    return tuned_values
-
-
 def parse_performance(text):
     """Return the first GENESIS ns/day performance value in text."""
     performance_match = PERFORMANCE_RE.search(text)
@@ -279,17 +251,6 @@ def input_options(text):
                 raw_value = section_lines[line_index].strip()
             options["input_%s_%s" % (section_key, parameter_key)] = " ".join(value_parts)
     return options
-
-
-def validate_tuned_values(tuned_values, tune_set):
-    """Return requested autotune values missing from a parsed report."""
-    missing_values = []
-    if "kernel" in tune_set:
-        kernel_values = tuned_values.get("kernel") or {}
-        missing_values.extend(kernel_key for kernel_key in KERNEL_KEYS if kernel_key not in kernel_values)
-        if "pme_schedule" not in tuned_values:
-            missing_values.append("pme_schedule")
-    return missing_values
 
 
 def acquire_lock(lock_path, label, poll_seconds=2.0):
@@ -527,28 +488,11 @@ def run_spdyn(input_path, timeout_seconds, mpi_procs, omp_threads, log_path=None
     return stdout_text, stderr_text, return_code, wall_seconds
 
 
-def build_tune_input(base_text, tune_set, num_steps, eneout_period, baroscale_period):
-    """Return a tuning input for one benchmark cell."""
-    blocks = split_sections(base_text)
-    set_run_window(blocks, num_steps, eneout_period)
-    set_baroscale_override(blocks, baroscale_period)
-    if "kernel" in tune_set:
-        set_parameter(blocks, "GPU", "kernel_autotune", "YES")
-    return join_sections(blocks)
-
-
-def build_pinned_input(base_text, tuned_values, tune_set, num_steps, eneout_period,
-                       baroscale_period):
-    """Return a measurement input with selected autotune values pinned."""
+def build_run_input(base_text, num_steps, eneout_period, baroscale_period):
+    """Return a measurement input with kernel autotuning disabled."""
     blocks = split_sections(base_text)
     set_run_window(blocks, num_steps, eneout_period)
     set_parameter(blocks, "GPU", "kernel_autotune", "NO")
-
-    if "kernel" in tune_set and tuned_values.get("kernel"):
-        for kernel_key in KERNEL_KEYS:
-            if kernel_key in tuned_values["kernel"]:
-                set_parameter(blocks, "GPU", kernel_key, tuned_values["kernel"][kernel_key])
-        set_parameter(blocks, "GPU", "pme_schedule", tuned_values["pme_schedule"])
     set_baroscale_override(blocks, baroscale_period)
     return join_sections(blocks)
 
@@ -599,11 +543,11 @@ def write_summary_log(path, lines):
             summary_file.write(line + "\n")
 
 
-def summary_table_lines(results, tune_set, measure_count, num_steps):
+def summary_table_lines(results, measure_count, num_steps):
     """Return the final aggregate ns/day table lines."""
     lines = [
-        "=== ns/day (mean/median +- std, cv%%) : tuners=%s, measure=%d, nsteps=%d ===" %
-        (",".join(sorted(tune_set)) or "none", measure_count, num_steps),
+        "=== ns/day (mean/median +- std, cv%%) : measure=%d, nsteps=%d ===" %
+        (measure_count, num_steps),
         "%-10s %-5s %-4s %12s %12s %10s %7s  %s" %
         ("system", "ens", "dt", "mean", "median", "+-std", "cv%", "note"),
         "-" * 82,
@@ -655,9 +599,6 @@ def validate_eneout_period(args, parser):
     if args.num_steps % args.eneout_period != 0:
         parser.error("--nsteps (%d) must be a multiple of --eneout-period (%d)" %
                      (args.num_steps, args.eneout_period))
-    if args.tune_num_steps % args.eneout_period != 0:
-        parser.error("--tune-nsteps (%d) must be a multiple of --eneout-period (%d)" %
-                     (args.tune_num_steps, args.eneout_period))
 
 
 def planned_cells(system_names, ensembles, time_steps):
@@ -677,7 +618,7 @@ def cell_label(cell):
 
 
 def run_cell(system_name, ensemble, time_step, args):
-    """Run tuning, warmup, and measurement for one benchmark cell."""
+    """Run warmup and measurement repetitions for one benchmark cell."""
     tag = cell_label((system_name, ensemble, time_step))
     base_path = os.path.join(INPUTS, tag + ".inp")
     if not os.path.isfile(base_path):
@@ -685,61 +626,22 @@ def run_cell(system_name, ensemble, time_step, args):
         return None
 
     base_text = open(base_path).read()
-    tuned_values = {}
     note = ""
     num_atoms = None
-    autotune_log = ""
 
-    if args.tune_set:
-        tune_input = os.path.join(args.input_log_dir, tag + ".tune.inp")
-        open(tune_input, "w").write(build_tune_input(
-            base_text, args.tune_set, args.tune_num_steps, args.eneout_period,
-            args.baroscale_period,
-        ))
-        tune_log = run_log_path(args.log_root, "autotune", tag, 1)
-        autotune_log = os.path.relpath(tune_log, HERE)
-        log("  [tune] %s  tuners=%s  nsteps=%d" %
-            (tag, ",".join(sorted(args.tune_set)), args.tune_num_steps))
-        stdout_text, stderr_text, return_code, wall_seconds = run_spdyn(
-            tune_input, args.timeout, args.mpi_procs, args.omp_threads,
-            tune_log, "autotune", tag, 1,
-        )
-        del wall_seconds
-        combined_output = (stdout_text or "") + "\n" + (stderr_text or "")
-        num_atoms = parse_num_atoms(combined_output) or num_atoms
-        if return_code != 0:
-            reason = "rc=%d" % return_code
-            log("  [tune FAILED: %s] %s" % (reason, (stderr_text or stdout_text)[-400:]))
-            return None
-        else:
-            tuned_values = parse_autotune_report(stdout_text)
-            missing_values = validate_tuned_values(tuned_values, args.tune_set)
-            if missing_values:
-                log("  [tune FAILED: missing parsed value(s): %s] %s" %
-                    (",".join(missing_values), tag))
-                return None
-            tuned_message = ", ".join(
-                "%s=%s" % (key, value) for key, value in tuned_values.items()
-                if key != "kernel"
-            )
-            if "kernel" in tuned_values:
-                tuned_message += ", kernel=" + str(tuned_values["kernel"])
-            log("    tuned: " + (tuned_message or "(nothing parsed)"))
-
-    pinned_input = os.path.join(args.input_log_dir, tag + ".pinned.inp")
-    pinned_text = build_pinned_input(
-        base_text, tuned_values, args.tune_set, args.num_steps, args.eneout_period,
-        args.baroscale_period,
+    run_input = os.path.join(args.input_log_dir, tag + ".run.inp")
+    run_text = build_run_input(
+        base_text, args.num_steps, args.eneout_period, args.baroscale_period,
     )
-    open(pinned_input, "w").write(pinned_text)
-    actual_baroscale_period = get_parameter_value(pinned_text, "DYNAMICS", "baroscale_period")
-    options = input_options(pinned_text)
+    open(run_input, "w").write(run_text)
+    actual_baroscale_period = get_parameter_value(run_text, "DYNAMICS", "baroscale_period")
+    options = input_options(run_text)
 
     for warmup_run in range(args.warmup):
         log("  [warmup %d/%d] %s" % (warmup_run + 1, args.warmup, tag))
         warmup_log = run_log_path(args.log_root, "production", tag, "warmup_%d" % (warmup_run + 1))
         stdout_text, stderr_text, return_code, wall_seconds = run_spdyn(
-            pinned_input, args.timeout, args.mpi_procs, args.omp_threads,
+            run_input, args.timeout, args.mpi_procs, args.omp_threads,
             warmup_log, "production-warmup", tag, warmup_run + 1,
         )
         del wall_seconds
@@ -752,7 +654,7 @@ def run_cell(system_name, ensemble, time_step, args):
     for measure_run in range(args.measure):
         production_log = run_log_path(args.log_root, "production", tag, measure_run + 1)
         stdout_text, stderr_text, return_code, wall_seconds = run_spdyn(
-            pinned_input, args.timeout, args.mpi_procs, args.omp_threads,
+            run_input, args.timeout, args.mpi_procs, args.omp_threads,
             production_log, "production-measure", tag, measure_run + 1,
         )
         num_atoms = parse_num_atoms((stdout_text or "") + "\n" + (stderr_text or "")) or num_atoms
@@ -787,11 +689,9 @@ def run_cell(system_name, ensemble, time_step, args):
         cv_percent=cv_value,
         measure_count=len(performance_values),
         runs=runs,
-        tuned=tuned_values,
         note=note,
         num_atoms=num_atoms,
         input_options=options,
-        autotune_log=autotune_log,
         baroscale_period=actual_baroscale_period,
         mpi_procs=args.mpi_procs,
         omp_threads=args.omp_threads,
@@ -804,20 +704,12 @@ def csv_fieldnames(input_columns):
         "system", "ensemble", "dt", "run_id", "ns_per_day", "wall_seconds",
         "ns_per_day_mean", "ns_per_day_median", "ns_per_day_std", "cv_pct",
         "n_measure", "mpi_procs", "omp_threads", "num_atoms",
-        "baroscale_period", "tuners", "note",
-        "autotune_log", "production_log",
-        "tuned_pme_schedule",
-    ] + ["tuned_%s" % kernel_key for kernel_key in KERNEL_KEYS] + [
-        "input_options_json",
+        "baroscale_period", "note", "production_log", "input_options_json",
     ] + list(input_columns)
 
 
 def planned_input_columns(cells, args):
     """Return input-option CSV columns for the selected benchmark matrix."""
-    sentinel_tuned_values = {
-        "kernel": dict((kernel_key, 0) for kernel_key in KERNEL_KEYS),
-        "pme_schedule": "SERIAL",
-    }
     columns = set()
     for cell in cells:
         tag = cell_label(cell)
@@ -825,18 +717,15 @@ def planned_input_columns(cells, args):
         if not os.path.isfile(base_path):
             continue
         base_text = open(base_path).read()
-        pinned_text = build_pinned_input(
-            base_text, sentinel_tuned_values, args.tune_set, args.num_steps,
-            args.eneout_period, args.baroscale_period,
+        run_text = build_run_input(
+            base_text, args.num_steps, args.eneout_period, args.baroscale_period,
         )
-        columns.update(input_options(pinned_text))
+        columns.update(input_options(run_text))
     return sorted(columns)
 
 
-def result_csv_rows(result, tune_set, input_columns):
+def result_csv_rows(result, input_columns):
     """Return CSV row dictionaries for one completed benchmark cell."""
-    tuned_values = result["tuned"]
-    kernel_values = tuned_values.get("kernel") or {}
     options = result["input_options"]
     missing_columns = sorted(set(options) - set(input_columns))
     if missing_columns:
@@ -856,14 +745,9 @@ def result_csv_rows(result, tune_set, input_columns):
         "omp_threads": result["omp_threads"],
         "num_atoms": result["num_atoms"] or "",
         "baroscale_period": result["baroscale_period"] or "",
-        "tuners": "|".join(sorted(tune_set)) or "none",
         "note": result.get("note", ""),
-        "autotune_log": result.get("autotune_log", ""),
-        "tuned_pme_schedule": tuned_values.get("pme_schedule", ""),
         "input_options_json": json.dumps(options, sort_keys=True, separators=(",", ":")),
     }
-    for kernel_key in KERNEL_KEYS:
-        base_row["tuned_%s" % kernel_key] = kernel_values.get(kernel_key, "")
     base_row.update(options)
 
     rows = []
@@ -886,11 +770,11 @@ def create_results_csv(csv_path, input_columns):
         writer.writeheader()
 
 
-def append_result_csv(csv_path, result, tune_set, input_columns):
+def append_result_csv(csv_path, result, input_columns):
     """Append one completed cell to the result CSV."""
     with open(csv_path, "a", newline="") as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=csv_fieldnames(input_columns), extrasaction="raise")
-        writer.writerows(result_csv_rows(result, tune_set, input_columns))
+        writer.writerows(result_csv_rows(result, input_columns))
         csv_file.flush()
         os.fsync(csv_file.fileno())
 
@@ -908,16 +792,10 @@ def build_parser():
                         help="discarded warm-up runs (default 2)")
     parser.add_argument("--measure", type=int, default=10,
                         help="timed runs (default 10)")
-    parser.add_argument("--tune", default="kernel",
-                        choices=("kernel", "none"),
-                        help="kernel autotuning or none (default kernel)")
     parser.add_argument("--nsteps", dest="num_steps", metavar="NSTEPS", type=positive_int, default=100000,
                         help="measurement-run nsteps (default 100000)")
-    parser.add_argument("--tune-nsteps", dest="tune_num_steps", metavar="TUNE_NSTEPS",
-                        type=positive_int, default=50000,
-                        help="tuning-run nsteps (default 50000)")
     parser.add_argument("--eneout-period", type=positive_int, default=1000,
-                        help="DYNAMICS eneout_period for tune and measurement inputs (default 1000)")
+                        help="DYNAMICS eneout_period for measurement inputs (default 1000)")
     parser.add_argument("--mpi-procs", type=positive_int, default=1,
                         help="MPI process count for each spdyn launch (default 1)")
     parser.add_argument("--omp-threads", type=positive_int, default=1,
@@ -937,13 +815,6 @@ def build_parser():
     parser.add_argument("--spdyn", default=SPDYN,
                         help="path to the spdyn binary")
     return parser
-
-
-def resolve_tune_set(args):
-    """Return the selected autotuner set."""
-    if args.tune == "none":
-        return set()
-    return {"kernel"}
 
 
 def parse_time_steps(time_steps_text, parser):
@@ -980,9 +851,6 @@ def main():
     args = parser.parse_args()
     validate_eneout_period(args, parser)
 
-    tune_set = resolve_tune_set(args)
-    args.tune_set = tune_set
-
     system_names = parse_systems(args.systems_text, parser)
     ensembles = parse_ensembles(args.ensembles_text)
     time_steps = parse_time_steps(args.time_steps_text, parser)
@@ -1006,7 +874,6 @@ def main():
             csv_path, log_root = unique_run_paths(requested_csv_path)
             args.log_root = log_root
             args.input_log_dir = os.path.join(log_root, "inputs")
-            os.makedirs(os.path.join(log_root, "autotune"), exist_ok=True)
             os.makedirs(os.path.join(log_root, "production"), exist_ok=True)
             os.makedirs(args.input_log_dir, exist_ok=True)
             open_benchmark_log(os.path.join(log_root, "benchmark.log"))
@@ -1019,9 +886,8 @@ def main():
             log("systems    : %s" % ",".join(system_names))
             log("ensembles  : %s" % ",".join(ensembles))
             log("dt         : %s" % ",".join(time_steps))
-            log("tuners     : %s" % (",".join(sorted(tune_set)) or "none"))
-            log("warmup/measure: %d/%d   nsteps meas/tune: %d/%d" %
-                (args.warmup, args.measure, args.num_steps, args.tune_num_steps))
+            log("warmup/measure: %d/%d   nsteps: %d" %
+                (args.warmup, args.measure, args.num_steps))
             log("eneout     : %d" % args.eneout_period)
             log("mpi/omp    : %d/%d" % (args.mpi_procs, args.omp_threads))
             log("baroscale : %s" % (args.baroscale_period if args.baroscale_period is not None else "input"))
@@ -1040,13 +906,13 @@ def main():
                 result = run_cell(system_name, ensemble, time_step, args)
                 if result:
                     results.append(result)
-                    append_result_csv(csv_path, result, tune_set, input_columns)
+                    append_result_csv(csv_path, result, input_columns)
                 else:
                     failures.append(cell_label((system_name, ensemble, time_step)))
         finally:
             release_lock(lock_fd)
 
-        table_lines = summary_table_lines(results, tune_set, args.measure, args.num_steps)
+        table_lines = summary_table_lines(results, args.measure, args.num_steps)
         emit("")
         for line in table_lines:
             emit(line)
