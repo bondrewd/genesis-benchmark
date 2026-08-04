@@ -25,9 +25,8 @@ baroscale_period  = 10
 
 [CONSTRAINTS]
 rigid_bond        = YES
-cons_scheme       = MSHAKE
-iter_solute       = 3
-iter_water        = 3
+cons_scheme       = MSHAKE-SETTLE
+iter_solute       = 2
 
 [ENSEMBLE]
 ensemble          = NPT

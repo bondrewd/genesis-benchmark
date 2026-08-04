@@ -277,9 +277,8 @@ def make_input(system_name, ensemble, time_step):
 
     lines.append("[CONSTRAINTS]")
     lines.append("rigid_bond       = YES")
-    lines.append("cons_scheme      = MSHAKE")
-    lines.append("iter_solute      = 3")
-    lines.append("iter_water       = 3")
+    lines.append("cons_scheme      = MSHAKE-SETTLE")
+    lines.append("iter_solute      = 2")
     if time_step == "4fs":
         lines.append("hydrogen_mass_upper_bound = 3.3")
     lines.append("")

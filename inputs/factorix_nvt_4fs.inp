@@ -23,9 +23,8 @@ thermostat_period         = 5
 
 [CONSTRAINTS]
 rigid_bond                = YES
-cons_scheme               = MSHAKE
-iter_solute               = 3
-iter_water                = 3
+cons_scheme               = MSHAKE-SETTLE
+iter_solute               = 2
 hydrogen_mass_upper_bound = 3.3
 
 [ENSEMBLE]
