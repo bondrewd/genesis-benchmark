@@ -277,3 +277,81 @@ cellulose,nvt,2fs,atoms=408609,raw=6.750
 cellulose,nvt,4fs,atoms=408609,raw=13.960
 dhfr_27k,nve,2fs,atoms=27346,raw=206.680
 ```
+
+## 2026-08-04 - input compatibility and canonical DHFR refresh
+
+Repository base commit: `95152844deacaaaa83360e02bece9d3bc99e4d82`
+(`genesis-benchmark`, dirty with this change). GENESIS commit:
+`f8de4a3cc3a85d5b56cf852e9bf7850f41872522` (clean).
+
+Scope: input/data correctness only. No performance comparison is claimed.
+The active DHFR system is now the standard 23,558-atom JAC PME benchmark, and
+the 27,346-atom dataset is removed from the active matrix. The AMBER20 suite
+downloaded from `https://ambermd.org/Amber20_Benchmark_Suite.tar.gz` has SHA256
+`7fee3a02f85f0eb1d07b6eb8902516947f29774ac870dbe17a7cb134d916f401` and
+contains `PME/Topologies/JAC.prmtop` with `NATOM = 23558`. The retained
+normal-mass GENESIS conversion has the same atom names, atom types, charges,
+bond count, angle count, dihedral count, residue count, atom count, and total
+mass as that current JAC topology; its normal hydrogen masses permit a genuine
+normal-mass 2 fs input and GENESIS runtime HMR at 4 fs.
+
+The packaged FactorIX and STMV AMBER topologies were also normalized from
+pre-applied HMR. The transformation changed only the `%FLAG MASS` section:
+each 3.024 amu hydrogen was restored to 1.008 amu and 2.016 amu was returned
+to its single bonded heavy atom. FactorIX restored 2,817 hydrogens bonded to
+1,851 heavy atoms; STMV restored 77,849 hydrogens bonded to 52,761 heavy atoms.
+Total topology mass was preserved at 554,212.334049 amu and 6,695,311.430000
+amu, respectively. All packaged systems now use normal hydrogen masses, with
+GENESIS runtime HMR enabled only by the 4 fs inputs.
+
+The FactorIX MD restart is retained in the source archive for provenance but
+is no longer referenced by benchmark inputs. It contains velocities generated
+for the former pre-HMR topology. Omitting it makes GENESIS initialize fresh
+velocities after runtime mass selection, avoiding an HMR/normal-mass kinetic
+energy mismatch in the new 2 fs cells.
+
+Canonical local archive hashes:
+
+```text
+data/dhfr.tgz    15491921bb5ccfae41d3f8ea37270fd8206180a82aca17a760a5d952ac896b6f
+dhfr/prmtop      027f7be194c2ad285281528011341ec40ec050f7b3acdf487094d7e2284993bf
+dhfr/inpcrd      7f084ccce438dc61e49bbf6c3ee2d2a56cf1d057dcd64cace42ae7b2a0105cfe
+data/factorix.tgz d2d7950bac0c384fbc84ccc00845e831e7b73750640ce78d0fec2b5f73d653cc
+factorix/FactorIX.prmtop 14c4527b64c5f4b6bef1fbbd90fec0fa6b8282bcc5517d2c0efae676e74d3838
+data/stmv.tgz    d991da1c1ee17f442730c41a68c9d3adc54b355ba1dc2d7e748b7f826bc7a735
+stmv/prmtop      94ccc723db70b7482f293632f880553ccb3ea73347c903cafd3cc7aecb700068
+```
+
+Static verification:
+
+```bash
+python3 -m unittest -v
+# 9 tests passed: exact 54-cell matrix, retired-key exclusion, global equals
+# alignment, MSHAKE/3/3 constraints, runtime-HMR policy, packaged AMBER/PSF/
+# GROMACS mass normalization, current kernel tuner parsing, and DHFR archive
+# NATOM/prefix checks.
+
+python3 -m py_compile generate_inputs.py run_benchmark.py test_benchmark_inputs.py
+# passed
+
+cd ../genesis-mkl-private && \
+  python3 tests/unit_tests/test_constraint_scheme_mapping.py
+# constraint scheme mapping: 9 passed, 0 failed
+
+git diff --check
+# passed
+```
+
+A lock-serialized all-54-cell 10-step GENESIS smoke was attempted with:
+
+```bash
+python3 run_benchmark.py --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn \
+  --ensembles nve,nvt,npt --dt 2,4 --tune none --warmup 0 --measure 1 \
+  --nsteps 10 --tune-nsteps 10 --eneout-period 10 --timeout 600 \
+  --timestamp input-refresh-smoke-native
+```
+
+The current host exposed no CUDA device (`nvidia-smi` could not communicate
+with the driver), so GENESIS stopped at `gpu_info.cu` before input parsing with
+`no CUDA-capable device is detected`. Consequently, no integration or
+performance result from that attempted run is counted as a pass.

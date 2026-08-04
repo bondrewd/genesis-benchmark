@@ -1,47 +1,43 @@
 [INPUT]
-prmtopfile       = data/ake/ake.top
-ambcrdfile       = data/ake/ake.rst
-ambreffile       = data/ake/ake.crd
-rstfile          = data/ake/restart.rst
-
-[OUTPUT]
+prmtopfile        = data/ake/ake.top
+ambcrdfile        = data/ake/ake.rst
+ambreffile        = data/ake/ake.crd
+rstfile           = data/ake/restart.rst
 
 [ENERGY]
-forcefield       = AMBER
-electrostatic    = PME
-switchdist       = 10.0
-cutoffdist       = 10.0
-pairlistdist     = 12.0
-table_density    = 20.0
-pme_alpha        = 0.34
-pme_ngrid_x      = 72
-pme_ngrid_y      = 72
-pme_ngrid_z      = 72
-pme_nspline      = 4
-nonbond_kernel   = GPU
-water_model      = WAT
+forcefield        = AMBER
+electrostatic     = PME
+switchdist        = 10.0
+cutoffdist        = 10.0
+pairlistdist      = 12.0
+table_density     = 20.0
+pme_alpha         = 0.34
+pme_ngrid_x       = 72
+pme_ngrid_y       = 72
+pme_ngrid_z       = 72
+pme_nspline       = 4
 
 [DYNAMICS]
-integrator       = VVER
-iseed            = 314159
-nsteps           = 100000
-timestep         = 0.002
-eneout_period    = 1000
-nbupdate_period  = 10
+integrator        = VVER
+iseed             = 314159
+nsteps            = 100000
+timestep          = 0.002
+eneout_period     = 1000
 thermostat_period = 10
 
 [CONSTRAINTS]
-rigid_bond       = YES
-water_model      = WAT
+rigid_bond        = YES
+cons_scheme       = MSHAKE
+iter_solute       = 3
+iter_water        = 3
 
 [ENSEMBLE]
-ensemble         = NVT
-tpcontrol        = BUSSI
-temperature      = 300
-group_tp         = YES
+ensemble          = NVT
+tpcontrol         = BUSSI
+temperature       = 300
 
 [BOUNDARY]
-type             = PBC
-domain_x         = 1
-domain_y         = 1
-domain_z         = 1
+type              = PBC
+domain_x          = 1
+domain_y          = 1
+domain_z          = 1

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Generate the GENESIS benchmark input matrix.
 
-The generated inputs cover 10 systems, 3 ensembles, and each system's supported
-time steps. Each generated input uses paths relative to the benchmark repository
-root because the benchmark driver launches GENESIS from that directory.
+The generated inputs cover 9 systems, 3 ensembles, and 2 time steps. Each input
+uses paths relative to the benchmark repository root because the benchmark
+driver launches GENESIS from that directory.
 """
 
 import os
@@ -13,12 +13,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(HERE, "inputs")
 
 SYSTEMS = {
-    "dhfr_27k": dict(
+    "dhfr": dict(
         forcefield="AMBER",
         input=[
-            "prmtopfile = data/dhfr_27k/step3_input.parm7",
-            "ambcrdfile = data/dhfr_27k/step3_input.rst7",
-            "rstfile    = data/dhfr_27k/equil.rst",
+            "prmtopfile = data/dhfr/prmtop",
+            "ambcrdfile = data/dhfr/inpcrd",
         ],
         energy=[
             "switchdist       = 8",
@@ -29,29 +28,6 @@ SYSTEMS = {
             "pme_ngrid_z      = 48",
             "pme_nspline      = 4",
         ],
-        energy_water=None,
-        constraints_extra=["water_model      = WAT"],
-        box=("1", "1", "1"),
-        domain=False,
-        npt_drops_box=False,
-    ),
-    "dhfr_23k": dict(
-        forcefield="AMBER",
-        input=[
-            "prmtopfile = data/dhfr_23k/prmtop",
-            "ambcrdfile = data/dhfr_23k/inpcrd",
-        ],
-        energy=[
-            "switchdist       = 8",
-            "cutoffdist       = 8",
-            "pairlistdist     = 9.5",
-            "pme_ngrid_x      = 48",
-            "pme_ngrid_y      = 48",
-            "pme_ngrid_z      = 48",
-            "pme_nspline      = 4",
-        ],
-        energy_water=None,
-        constraints_extra=["water_model      = WAT"],
         box=("62.23", "62.23", "62.23"),
         domain=False,
         npt_drops_box=False,
@@ -75,8 +51,6 @@ SYSTEMS = {
             "pme_ngrid_z      = 64",
             "pme_nspline      = 4",
         ],
-        energy_water=None,
-        constraints_extra=[],
         box=("107.4979", "107.4979", "76.7872"),
         domain=True,
         npt_drops_box=True,
@@ -108,8 +82,6 @@ SYSTEMS = {
             "pme_ngrid_z      = 128",
             "pme_nspline      = 4",
         ],
-        energy_water="NONE",
-        constraints_extra=[],
         box=("126.5795", "126.5795", "130.6978"),
         domain=True,
         npt_drops_box=False,
@@ -119,7 +91,6 @@ SYSTEMS = {
         input=[
             "prmtopfile = data/factorix/FactorIX.prmtop",
             "ambcrdfile = data/factorix/FactorIX.inpcrd",
-            "rstfile    = data/factorix/rst",
         ],
         energy=[
             "switchdist       = 8",
@@ -127,13 +98,9 @@ SYSTEMS = {
             "pairlistdist     = 9.5",
             "pme_nspline      = 4",
         ],
-        energy_water=None,
-        constraints_extra=["water_model      = WAT"],
         box=("142.0855468", "83.3368905", "78.6783548"),
         domain=False,
-        npt_drops_box=True,
-        hmr_topology=True,
-        time_steps=("4fs",),
+        npt_drops_box=False,
     ),
     "bpti": dict(
         forcefield="GROAMBER",
@@ -153,8 +120,6 @@ SYSTEMS = {
             "pme_ngrid_z      = 64",
             "pme_nspline      = 4",
         ],
-        energy_water=None,
-        constraints_extra=["water_model      = SOL"],
         box=None,
         domain=True,
         npt_drops_box=False,
@@ -180,8 +145,6 @@ SYSTEMS = {
             "pme_ngrid_z      = 72",
             "pme_nspline      = 4",
         ],
-        energy_water=None,
-        constraints_extra=[],
         box=None,
         domain=True,
         npt_drops_box=False,
@@ -205,8 +168,6 @@ SYSTEMS = {
             "pme_ngrid_z      = 72",
             "pme_nspline      = 4",
         ],
-        energy_water="WAT",
-        constraints_extra=["water_model      = WAT"],
         box=None,
         domain=True,
         npt_drops_box=False,
@@ -223,13 +184,9 @@ SYSTEMS = {
             "pairlistdist     = 9.5",
             "pme_nspline      = 4",
         ],
-        energy_water=None,
-        constraints_extra=["water_model      = WAT"],
         box=("221.1723142", "223.1988809", "224.4925841"),
         domain=False,
         npt_drops_box=False,
-        hmr_topology=True,
-        time_steps=("4fs",),
     ),
     "cellulose": dict(
         forcefield="AMBER",
@@ -243,8 +200,6 @@ SYSTEMS = {
             "pairlistdist     = 9.5",
             "pme_nspline      = 4",
         ],
-        energy_water=None,
-        constraints_extra=["water_model      = WAT"],
         box=("259.2299548", "124.5580494", "123.5021394"),
         domain=False,
         npt_drops_box=False,
@@ -255,13 +210,21 @@ ENSEMBLES = ("nve", "nvt", "npt")
 TIME_STEPS = {"2fs": "0.002", "4fs": "0.004"}
 BASE_NUM_STEPS = 100000
 BASE_ENEOUT_PERIOD = 1000
-DEFAULT_NBUPDATE_PERIOD = 10
 COUPLING_PERIOD_BY_TIME_STEP = {"2fs": 10, "4fs": 5}
 
 
-def system_time_steps(config):
-    """Return supported time-step labels for one system."""
-    return config.get("time_steps", tuple(TIME_STEPS))
+def align_assignments(lines):
+    """Return input text with every parameter assignment aligned globally."""
+    keys = [line.partition("=")[0].strip() for line in lines if "=" in line]
+    width = max(len(key) for key in keys)
+    aligned = []
+    for line in lines:
+        if "=" not in line:
+            aligned.append(line)
+            continue
+        key, _, value = line.partition("=")
+        aligned.append("%s = %s" % (key.strip().ljust(width), value.strip()))
+    return "\n".join(aligned).rstrip() + "\n"
 
 
 def boundary_block(config, ensemble):
@@ -289,16 +252,10 @@ def make_input(system_name, ensemble, time_step):
     lines += config["input"]
     lines.append("")
 
-    lines.append("[OUTPUT]")
-    lines.append("")
-
     lines.append("[ENERGY]")
     lines.append("forcefield       = %s" % config["forcefield"])
     lines.append("electrostatic    = PME")
     lines += config["energy"]
-    lines.append("nonbond_kernel   = GPU")
-    if config["energy_water"] is not None:
-        lines.append("water_model      = %s" % config["energy_water"])
     lines.append("")
 
     lines.append("[DYNAMICS]")
@@ -306,13 +263,11 @@ def make_input(system_name, ensemble, time_step):
     lines.append("iseed            = 314159")
     lines.append("nsteps           = %d" % BASE_NUM_STEPS)
     lines.append("timestep         = %s" % TIME_STEPS[time_step])
-    has_hmr_topology = config.get("hmr_topology", False)
-    if time_step == "4fs" and not has_hmr_topology:
+    if time_step == "4fs":
         lines.append("hydrogen_mr      = YES")
         lines.append("hmr_target       = all")
         lines.append("hmr_ratio        = 3.0")
     lines.append("eneout_period    = %d" % BASE_ENEOUT_PERIOD)
-    lines.append("nbupdate_period  = %d" % DEFAULT_NBUPDATE_PERIOD)
     if ensemble in ("nvt", "npt"):
         lines.append("thermostat_period = %d" % coupling_period)
     if ensemble == "npt":
@@ -322,8 +277,10 @@ def make_input(system_name, ensemble, time_step):
 
     lines.append("[CONSTRAINTS]")
     lines.append("rigid_bond       = YES")
-    lines += config["constraints_extra"]
-    if time_step == "4fs" or has_hmr_topology:
+    lines.append("cons_scheme      = MSHAKE")
+    lines.append("iter_solute      = 3")
+    lines.append("iter_water       = 3")
+    if time_step == "4fs":
         lines.append("hydrogen_mass_upper_bound = 3.3")
     lines.append("")
 
@@ -333,21 +290,30 @@ def make_input(system_name, ensemble, time_step):
     lines.append("temperature      = 300")
     if ensemble == "npt":
         lines.append("pressure         = 1.0")
-    lines.append("group_tp         = YES")
     lines.append("")
 
     lines += boundary_block(config, ensemble)
     lines.append("")
-    return "\n".join(lines).rstrip() + "\n"
+    return align_assignments(lines)
 
 
 def main():
     """Write all generated input files."""
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    expected_names = {
+        "%s_%s_%s.inp" % (system_name, ensemble, time_step)
+        for system_name in SYSTEMS
+        for ensemble in ENSEMBLES
+        for time_step in TIME_STEPS
+    }
+    for file_name in os.listdir(OUTPUT_DIR):
+        if file_name.endswith(".inp") and file_name not in expected_names:
+            os.remove(os.path.join(OUTPUT_DIR, file_name))
+
     files_written = 0
-    for system_name, config in SYSTEMS.items():
+    for system_name in SYSTEMS:
         for ensemble in ENSEMBLES:
-            for time_step in system_time_steps(config):
+            for time_step in TIME_STEPS:
                 file_name = "%s_%s_%s.inp" % (system_name, ensemble, time_step)
                 output_path = os.path.join(OUTPUT_DIR, file_name)
                 with open(output_path, "w") as input_file:

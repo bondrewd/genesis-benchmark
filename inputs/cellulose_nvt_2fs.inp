@@ -1,39 +1,36 @@
 [INPUT]
-prmtopfile = data/cellulose/prmtop
-ambcrdfile = data/cellulose/inpcrd
-
-[OUTPUT]
+prmtopfile        = data/cellulose/prmtop
+ambcrdfile        = data/cellulose/inpcrd
 
 [ENERGY]
-forcefield       = AMBER
-electrostatic    = PME
-switchdist       = 8
-cutoffdist       = 8
-pairlistdist     = 9.5
-pme_nspline      = 4
-nonbond_kernel   = GPU
+forcefield        = AMBER
+electrostatic     = PME
+switchdist        = 8
+cutoffdist        = 8
+pairlistdist      = 9.5
+pme_nspline       = 4
 
 [DYNAMICS]
-integrator       = VVER
-iseed            = 314159
-nsteps           = 100000
-timestep         = 0.002
-eneout_period    = 1000
-nbupdate_period  = 10
+integrator        = VVER
+iseed             = 314159
+nsteps            = 100000
+timestep          = 0.002
+eneout_period     = 1000
 thermostat_period = 10
 
 [CONSTRAINTS]
-rigid_bond       = YES
-water_model      = WAT
+rigid_bond        = YES
+cons_scheme       = MSHAKE
+iter_solute       = 3
+iter_water        = 3
 
 [ENSEMBLE]
-ensemble         = NVT
-tpcontrol        = BUSSI
-temperature      = 300
-group_tp         = YES
+ensemble          = NVT
+tpcontrol         = BUSSI
+temperature       = 300
 
 [BOUNDARY]
-type             = PBC
-box_size_x       = 259.2299548
-box_size_y       = 124.5580494
-box_size_z       = 123.5021394
+type              = PBC
+box_size_x        = 259.2299548
+box_size_y        = 124.5580494
+box_size_z        = 123.5021394

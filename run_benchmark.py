@@ -32,8 +32,7 @@ RESULTS = os.path.join(HERE, "results")
 SPDYN = os.path.normpath(os.path.join(HERE, "..", "src", "spdyn_singlempi", "spdyn"))
 
 ALL_SYSTEMS = [
-    "dhfr_27k",
-    "dhfr_23k",
+    "dhfr",
     "apoa1",
     "uun",
     "factorix",
@@ -45,17 +44,16 @@ ALL_SYSTEMS = [
 ]
 ALL_ENSEMBLES = ["nve", "nvt", "npt"]
 ALL_TIME_STEPS = ["2fs", "4fs"]
-SYSTEM_TIME_STEPS = dict((system_name, list(ALL_TIME_STEPS)) for system_name in ALL_SYSTEMS)
-SYSTEM_TIME_STEPS["factorix"] = ["4fs"]
-SYSTEM_TIME_STEPS["stmv"] = ["4fs"]
 ARCHIVE_SENTINEL = ".archive_sha256"
 KERNEL_KEYS = [
     "kernel_pme_spread_block",
-    "kernel_pme_influence_block",
+    "kernel_pme_reciprocal_prefactor_block",
     "kernel_bonded_block",
     "kernel_constraints_block",
     "kernel_nonbond_inter_minblocks",
     "kernel_nonbond_intra_minblocks",
+    "kernel_special_block",
+    "kernel_integrator_group_block",
 ]
 
 PERFORMANCE_RE = re.compile(r"\[PERFORMANCE\]\s*(?:performance:\s*)?([0-9.]+)\s*ns/day")
@@ -99,7 +97,31 @@ def join_sections(blocks):
     for section_name, section_lines in blocks:
         del section_name
         output_lines.extend(section_lines)
-    return "\n".join(output_lines).rstrip("\n") + "\n"
+    return align_assignments("\n".join(output_lines))
+
+
+def align_assignments(text):
+    """Return control-file text with every parameter assignment aligned."""
+    lines = text.splitlines()
+    keys = []
+    for raw_line in lines:
+        key_match = KEYLINE_RE.match(raw_line)
+        if key_match:
+            keys.append(key_match.group(1))
+    if not keys:
+        return text.rstrip("\n") + "\n"
+
+    width = max(len(key) for key in keys)
+    aligned_lines = []
+    for raw_line in lines:
+        key_match = KEYLINE_RE.match(raw_line)
+        if not key_match:
+            aligned_lines.append(raw_line)
+            continue
+        key = key_match.group(1)
+        value = raw_line.split("=", 1)[1].strip()
+        aligned_lines.append("%s = %s" % (key.ljust(width), value))
+    return "\n".join(aligned_lines).rstrip("\n") + "\n"
 
 
 def find_section(blocks, section):
@@ -179,63 +201,24 @@ def set_run_window(blocks, num_steps, eneout_period):
     set_parameter(blocks, "DYNAMICS", "eneout_period", eneout_period)
 
 
-def set_period_overrides(blocks, nbupdate_period, baroscale_period):
-    """Apply optional update-period overrides to a control file."""
-    if nbupdate_period is not None:
-        set_parameter(blocks, "DYNAMICS", "nbupdate_period", nbupdate_period)
+def set_baroscale_override(blocks, baroscale_period):
+    """Apply an optional NPT barostat-scaling-period override."""
     if baroscale_period is not None and has_parameter(blocks, "DYNAMICS", "barostat_period"):
         set_parameter(blocks, "DYNAMICS", "baroscale_period", baroscale_period)
 
 
 def parse_autotune_report(text):
-    """Extract tuned kernel, cell-size, and neighbor-list values."""
+    """Extract tuned kernel values from a GENESIS autotune report."""
     tuned_values = {}
-    report_lines = text.splitlines()
-
-    for line_index, raw_line in enumerate(report_lines):
-        if "ms/window" not in raw_line or "(selected)" not in raw_line:
-            continue
-
-        pairlistdist = None
-        nbupdate_period = None
-        for candidate_line in report_lines[line_index + 1:]:
-            if (
-                "ms/window" in candidate_line
-                or "Cell size autotune" in candidate_line
-                or "Selected" in candidate_line
-            ):
-                break
-            if pairlistdist is None:
-                pairlistdist_match = re.search(r"pairlistdist\s*=\s*([0-9.]+)", candidate_line)
-                if pairlistdist_match:
-                    pairlistdist = float(pairlistdist_match.group(1))
-            if nbupdate_period is None:
-                nbupdate_match = re.search(r"nbupdate_period\s*=\s*([0-9]+)", candidate_line)
-                if nbupdate_match:
-                    nbupdate_period = int(nbupdate_match.group(1))
-            if pairlistdist is not None and nbupdate_period is not None:
-                break
-        if pairlistdist is not None:
-            tuned_values["pairlistdist"] = pairlistdist
-        if nbupdate_period is not None:
-            tuned_values["nbupdate_period"] = nbupdate_period
-        break
-
-    for line_index, raw_line in enumerate(report_lines):
-        if "Selected configuration:" not in raw_line:
-            continue
-        for cell_line in report_lines[line_index + 1: line_index + 4]:
-            cell_size_match = re.search(r"cell_size\s*=\s*([0-9.]+)", cell_line)
-            if cell_size_match:
-                tuned_values["cell_size"] = float(cell_size_match.group(1))
-                break
-        break
 
     kernel_values = {}
-    for raw_line in report_lines:
+    for raw_line in text.splitlines():
         kernel_match = re.match(r"\s*(kernel_\w+)\s*=\s*([0-9]+)", raw_line)
         if kernel_match and kernel_match.group(1) in KERNEL_KEYS:
             kernel_values[kernel_match.group(1)] = int(kernel_match.group(2))
+        schedule_match = re.match(r"\s*pme_schedule\s*=\s*([A-Za-z_]+)", raw_line)
+        if schedule_match:
+            tuned_values["pme_schedule"] = schedule_match.group(1)
     if kernel_values:
         tuned_values["kernel"] = kernel_values
     return tuned_values
@@ -304,13 +287,8 @@ def validate_tuned_values(tuned_values, tune_set):
     if "kernel" in tune_set:
         kernel_values = tuned_values.get("kernel") or {}
         missing_values.extend(kernel_key for kernel_key in KERNEL_KEYS if kernel_key not in kernel_values)
-    if "cell" in tune_set and "cell_size" not in tuned_values:
-        missing_values.append("cell_size")
-    if "nblist" in tune_set:
-        if "pairlistdist" not in tuned_values:
-            missing_values.append("pairlistdist")
-        if "nbupdate_period" not in tuned_values:
-            missing_values.append("nbupdate_period")
+        if "pme_schedule" not in tuned_values:
+            missing_values.append("pme_schedule")
     return missing_values
 
 
@@ -549,41 +527,29 @@ def run_spdyn(input_path, timeout_seconds, mpi_procs, omp_threads, log_path=None
     return stdout_text, stderr_text, return_code, wall_seconds
 
 
-def build_tune_input(base_text, tune_set, num_steps, eneout_period, nbupdate_period, baroscale_period):
+def build_tune_input(base_text, tune_set, num_steps, eneout_period, baroscale_period):
     """Return a tuning input for one benchmark cell."""
     blocks = split_sections(base_text)
     set_run_window(blocks, num_steps, eneout_period)
-    set_period_overrides(blocks, nbupdate_period, baroscale_period)
-    if "cell" in tune_set:
-        set_parameter(blocks, "ENERGY", "cell_size_autotune", "YES")
-    if "nblist" in tune_set:
-        set_parameter(blocks, "DYNAMICS", "nbupdate_autotune", "YES")
+    set_baroscale_override(blocks, baroscale_period)
     if "kernel" in tune_set:
         set_parameter(blocks, "GPU", "kernel_autotune", "YES")
     return join_sections(blocks)
 
 
 def build_pinned_input(base_text, tuned_values, tune_set, num_steps, eneout_period,
-                       nbupdate_period, baroscale_period):
+                       baroscale_period):
     """Return a measurement input with selected autotune values pinned."""
     blocks = split_sections(base_text)
     set_run_window(blocks, num_steps, eneout_period)
-    set_parameter(blocks, "ENERGY", "cell_size_autotune", "NO")
-    set_parameter(blocks, "DYNAMICS", "nbupdate_autotune", "NO")
     set_parameter(blocks, "GPU", "kernel_autotune", "NO")
 
     if "kernel" in tune_set and tuned_values.get("kernel"):
         for kernel_key in KERNEL_KEYS:
             if kernel_key in tuned_values["kernel"]:
                 set_parameter(blocks, "GPU", kernel_key, tuned_values["kernel"][kernel_key])
-    if "cell" in tune_set and "cell_size" in tuned_values:
-        set_parameter(blocks, "ENERGY", "cell_size", "%.3f" % tuned_values["cell_size"])
-    if "nblist" in tune_set:
-        if "pairlistdist" in tuned_values:
-            set_parameter(blocks, "ENERGY", "pairlistdist", "%.3f" % tuned_values["pairlistdist"])
-        if "nbupdate_period" in tuned_values:
-            set_parameter(blocks, "DYNAMICS", "nbupdate_period", tuned_values["nbupdate_period"])
-    set_period_overrides(blocks, nbupdate_period, baroscale_period)
+        set_parameter(blocks, "GPU", "pme_schedule", tuned_values["pme_schedule"])
+    set_baroscale_override(blocks, baroscale_period)
     return join_sections(blocks)
 
 
@@ -695,19 +661,13 @@ def validate_eneout_period(args, parser):
 
 
 def planned_cells(system_names, ensembles, time_steps):
-    """Return runnable benchmark cells and unsupported requested cells."""
+    """Return the complete requested benchmark matrix."""
     cells = []
-    skipped_cells = []
     for system_name in system_names:
-        supported_time_steps = set(SYSTEM_TIME_STEPS[system_name])
         for ensemble in ensembles:
             for time_step in time_steps:
-                cell = (system_name, ensemble, time_step)
-                if time_step in supported_time_steps:
-                    cells.append(cell)
-                else:
-                    skipped_cells.append(cell)
-    return cells, skipped_cells
+                cells.append((system_name, ensemble, time_step))
+    return cells
 
 
 def cell_label(cell):
@@ -734,7 +694,7 @@ def run_cell(system_name, ensemble, time_step, args):
         tune_input = os.path.join(args.input_log_dir, tag + ".tune.inp")
         open(tune_input, "w").write(build_tune_input(
             base_text, args.tune_set, args.tune_num_steps, args.eneout_period,
-            args.nbupdate_period, args.baroscale_period,
+            args.baroscale_period,
         ))
         tune_log = run_log_path(args.log_root, "autotune", tag, 1)
         autotune_log = os.path.relpath(tune_log, HERE)
@@ -748,13 +708,9 @@ def run_cell(system_name, ensemble, time_step, args):
         combined_output = (stdout_text or "") + "\n" + (stderr_text or "")
         num_atoms = parse_num_atoms(combined_output) or num_atoms
         if return_code != 0:
-            reason = "cell overflow" if "cell too large" in combined_output else ("rc=%d" % return_code)
-            if args.tune_set <= {"kernel"} or "cell overflow" not in reason:
-                log("  [tune FAILED: %s] %s" % (reason, (stderr_text or stdout_text)[-400:]))
-                return None
-            log("  [tune FAILED: %s -> measuring with DEFAULTS] %s" % (reason, tag))
-            note = "tune-failed(%s)" % reason
-            tuned_values = {}
+            reason = "rc=%d" % return_code
+            log("  [tune FAILED: %s] %s" % (reason, (stderr_text or stdout_text)[-400:]))
+            return None
         else:
             tuned_values = parse_autotune_report(stdout_text)
             missing_values = validate_tuned_values(tuned_values, args.tune_set)
@@ -767,16 +723,15 @@ def run_cell(system_name, ensemble, time_step, args):
                 if key != "kernel"
             )
             if "kernel" in tuned_values:
-                tuned_message += " kernel=" + str(tuned_values["kernel"])
+                tuned_message += ", kernel=" + str(tuned_values["kernel"])
             log("    tuned: " + (tuned_message or "(nothing parsed)"))
 
     pinned_input = os.path.join(args.input_log_dir, tag + ".pinned.inp")
     pinned_text = build_pinned_input(
         base_text, tuned_values, args.tune_set, args.num_steps, args.eneout_period,
-        args.nbupdate_period, args.baroscale_period,
+        args.baroscale_period,
     )
     open(pinned_input, "w").write(pinned_text)
-    actual_nbupdate_period = get_parameter_value(pinned_text, "DYNAMICS", "nbupdate_period")
     actual_baroscale_period = get_parameter_value(pinned_text, "DYNAMICS", "baroscale_period")
     options = input_options(pinned_text)
 
@@ -837,7 +792,6 @@ def run_cell(system_name, ensemble, time_step, args):
         num_atoms=num_atoms,
         input_options=options,
         autotune_log=autotune_log,
-        nbupdate_period=actual_nbupdate_period,
         baroscale_period=actual_baroscale_period,
         mpi_procs=args.mpi_procs,
         omp_threads=args.omp_threads,
@@ -850,9 +804,9 @@ def csv_fieldnames(input_columns):
         "system", "ensemble", "dt", "run_id", "ns_per_day", "wall_seconds",
         "ns_per_day_mean", "ns_per_day_median", "ns_per_day_std", "cv_pct",
         "n_measure", "mpi_procs", "omp_threads", "num_atoms",
-        "nbupdate_period", "baroscale_period", "tuners", "note",
+        "baroscale_period", "tuners", "note",
         "autotune_log", "production_log",
-        "tuned_cell_size", "tuned_pairlistdist", "tuned_nbupdate_period",
+        "tuned_pme_schedule",
     ] + ["tuned_%s" % kernel_key for kernel_key in KERNEL_KEYS] + [
         "input_options_json",
     ] + list(input_columns)
@@ -862,9 +816,7 @@ def planned_input_columns(cells, args):
     """Return input-option CSV columns for the selected benchmark matrix."""
     sentinel_tuned_values = {
         "kernel": dict((kernel_key, 0) for kernel_key in KERNEL_KEYS),
-        "cell_size": 0.0,
-        "pairlistdist": 0.0,
-        "nbupdate_period": 0,
+        "pme_schedule": "SERIAL",
     }
     columns = set()
     for cell in cells:
@@ -875,7 +827,7 @@ def planned_input_columns(cells, args):
         base_text = open(base_path).read()
         pinned_text = build_pinned_input(
             base_text, sentinel_tuned_values, args.tune_set, args.num_steps,
-            args.eneout_period, args.nbupdate_period, args.baroscale_period,
+            args.eneout_period, args.baroscale_period,
         )
         columns.update(input_options(pinned_text))
     return sorted(columns)
@@ -903,14 +855,11 @@ def result_csv_rows(result, tune_set, input_columns):
         "mpi_procs": result["mpi_procs"],
         "omp_threads": result["omp_threads"],
         "num_atoms": result["num_atoms"] or "",
-        "nbupdate_period": result["nbupdate_period"] or "",
         "baroscale_period": result["baroscale_period"] or "",
         "tuners": "|".join(sorted(tune_set)) or "none",
         "note": result.get("note", ""),
         "autotune_log": result.get("autotune_log", ""),
-        "tuned_cell_size": ("%.3f" % tuned_values["cell_size"]) if "cell_size" in tuned_values else "",
-        "tuned_pairlistdist": ("%.3f" % tuned_values["pairlistdist"]) if "pairlistdist" in tuned_values else "",
-        "tuned_nbupdate_period": tuned_values.get("nbupdate_period", ""),
+        "tuned_pme_schedule": tuned_values.get("pme_schedule", ""),
         "input_options_json": json.dumps(options, sort_keys=True, separators=(",", ":")),
     }
     for kernel_key in KERNEL_KEYS:
@@ -960,9 +909,8 @@ def build_parser():
     parser.add_argument("--measure", type=int, default=10,
                         help="timed runs (default 10)")
     parser.add_argument("--tune", default="kernel",
-                        help="which autotuners: comma list of kernel,cell,nblist | all | none (default kernel)")
-    parser.add_argument("--full-autotune", action="store_true",
-                        help="shortcut for --tune kernel,cell,nblist")
+                        choices=("kernel", "none"),
+                        help="kernel autotuning or none (default kernel)")
     parser.add_argument("--nsteps", dest="num_steps", metavar="NSTEPS", type=positive_int, default=100000,
                         help="measurement-run nsteps (default 100000)")
     parser.add_argument("--tune-nsteps", dest="tune_num_steps", metavar="TUNE_NSTEPS",
@@ -974,8 +922,6 @@ def build_parser():
                         help="MPI process count for each spdyn launch (default 1)")
     parser.add_argument("--omp-threads", type=positive_int, default=1,
                         help="OMP_NUM_THREADS for each spdyn launch (default 1)")
-    parser.add_argument("--nbupdate-period", type=positive_int, default=None,
-                        help="DYNAMICS nbupdate_period override for work inputs")
     parser.add_argument("--baroscale-period", type=positive_int, default=None,
                         help="DYNAMICS baroscale_period override for NPT work inputs")
     parser.add_argument("--timeout", type=int, default=7200,
@@ -993,24 +939,11 @@ def build_parser():
     return parser
 
 
-def resolve_tune_set(args, parser):
+def resolve_tune_set(args):
     """Return the selected autotuner set."""
-    if args.full_autotune:
-        return {"kernel", "cell", "nblist"}
-
-    raw_tuners = [tuner.strip().lower() for tuner in args.tune.split(",") if tuner.strip()]
-    if "all" in raw_tuners:
-        return {"kernel", "cell", "nblist"}
-    if "none" in raw_tuners or not raw_tuners:
+    if args.tune == "none":
         return set()
-
-    aliases = {"nbupdate": "nblist", "nb": "nblist", "cell_size": "cell"}
-    tune_set = set(aliases.get(tuner, tuner) for tuner in raw_tuners)
-    unknown_tuners = tune_set - {"kernel", "cell", "nblist"}
-    if unknown_tuners:
-        parser.error("unknown tuner(s): %s (use kernel,cell,nblist,all,none)" %
-                     ",".join(sorted(unknown_tuners)))
-    return tune_set
+    return {"kernel"}
 
 
 def parse_time_steps(time_steps_text, parser):
@@ -1047,18 +980,13 @@ def main():
     args = parser.parse_args()
     validate_eneout_period(args, parser)
 
-    tune_set = resolve_tune_set(args, parser)
+    tune_set = resolve_tune_set(args)
     args.tune_set = tune_set
-    if "nblist" in tune_set and args.nbupdate_period is not None:
-        parser.error("--nbupdate-period cannot be combined with nblist autotune; "
-                     "pairlistdist and nbupdate_period are tuned as a coupled pair")
 
     system_names = parse_systems(args.systems_text, parser)
     ensembles = parse_ensembles(args.ensembles_text)
     time_steps = parse_time_steps(args.time_steps_text, parser)
-    cells, skipped_cells = planned_cells(system_names, ensembles, time_steps)
-    if not cells:
-        parser.error("no runnable cells; pre-HMR topologies factorix and stmv support only 4fs")
+    cells = planned_cells(system_names, ensembles, time_steps)
 
     SPDYN = os.path.abspath(os.path.expanduser(args.spdyn))
     if not (os.path.isfile(SPDYN) and os.access(SPDYN, os.X_OK)):
@@ -1096,7 +1024,6 @@ def main():
                 (args.warmup, args.measure, args.num_steps, args.tune_num_steps))
             log("eneout     : %d" % args.eneout_period)
             log("mpi/omp    : %d/%d" % (args.mpi_procs, args.omp_threads))
-            log("nbupdate  : %s" % (args.nbupdate_period if args.nbupdate_period is not None else "input"))
             log("baroscale : %s" % (args.baroscale_period if args.baroscale_period is not None else "input"))
             log("lock       : %s" % args.lock)
             log("csv        : %s" % csv_path)
@@ -1105,9 +1032,6 @@ def main():
             log("summary    : %s" % os.path.join(log_root, "summary.log"))
             if csv_path != requested_csv_path:
                 log("csv note   : requested output existed; using non-overwriting suffix")
-            if skipped_cells:
-                log("skip       : %s (pre-HMR topology supports 4fs only)" %
-                    ",".join(cell_label(cell) for cell in skipped_cells))
             for system_name in extracted_systems:
                 log("data       : extracted data/%s.tgz -> data/%s/" % (system_name, system_name))
             log("")

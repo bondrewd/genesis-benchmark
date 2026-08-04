@@ -1,52 +1,50 @@
 [INPUT]
-topfile = data/apoa1/top_all27_prot_lipid.rtf
-parfile = data/apoa1/par_all27_prot_lipid.prm
-psffile = data/apoa1/apoa1.psf
-pdbfile = data/apoa1/apoa1.pdb
-rstfile = data/apoa1/apoa1.rst
-
-[OUTPUT]
+topfile                   = data/apoa1/top_all27_prot_lipid.rtf
+parfile                   = data/apoa1/par_all27_prot_lipid.prm
+psffile                   = data/apoa1/apoa1.psf
+pdbfile                   = data/apoa1/apoa1.pdb
+rstfile                   = data/apoa1/apoa1.rst
 
 [ENERGY]
-forcefield       = CHARMM
-electrostatic    = PME
-switchdist       = 10.0
-cutoffdist       = 12.0
-pairlistdist     = 13.5
-pme_alpha        = 0.34
-pme_ngrid_x      = 80
-pme_ngrid_y      = 80
-pme_ngrid_z      = 64
-pme_nspline      = 4
-nonbond_kernel   = GPU
+forcefield                = CHARMM
+electrostatic             = PME
+switchdist                = 10.0
+cutoffdist                = 12.0
+pairlistdist              = 13.5
+pme_alpha                 = 0.34
+pme_ngrid_x               = 80
+pme_ngrid_y               = 80
+pme_ngrid_z               = 64
+pme_nspline               = 4
 
 [DYNAMICS]
-integrator       = VVER
-iseed            = 314159
-nsteps           = 100000
-timestep         = 0.004
-hydrogen_mr      = YES
-hmr_target       = all
-hmr_ratio        = 3.0
-eneout_period    = 1000
-nbupdate_period  = 10
-thermostat_period = 5
+integrator                = VVER
+iseed                     = 314159
+nsteps                    = 100000
+timestep                  = 0.004
+hydrogen_mr               = YES
+hmr_target                = all
+hmr_ratio                 = 3.0
+eneout_period             = 1000
+thermostat_period         = 5
 
 [CONSTRAINTS]
-rigid_bond       = YES
+rigid_bond                = YES
+cons_scheme               = MSHAKE
+iter_solute               = 3
+iter_water                = 3
 hydrogen_mass_upper_bound = 3.3
 
 [ENSEMBLE]
-ensemble         = NVT
-tpcontrol        = BUSSI
-temperature      = 300
-group_tp         = YES
+ensemble                  = NVT
+tpcontrol                 = BUSSI
+temperature               = 300
 
 [BOUNDARY]
-type             = PBC
-box_size_x       = 107.4979
-box_size_y       = 107.4979
-box_size_z       = 76.7872
-domain_x         = 1
-domain_y         = 1
-domain_z         = 1
+type                      = PBC
+box_size_x                = 107.4979
+box_size_y                = 107.4979
+box_size_z                = 76.7872
+domain_x                  = 1
+domain_y                  = 1
+domain_z                  = 1
