@@ -43,7 +43,7 @@ DEFAULT_OUTPUT_ROOT = DATA / "variants"
 DEFAULT_AMBER_TIP3P_IONS = Path(
     "/home/diego/miniforge3/envs/AmberTools26/dat/leap/parm/frcmod.ionsjc_tip3p"
 )
-SCRIPT_VERSION = 5
+SCRIPT_VERSION = 1
 PREPARATION_SCRIPT_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 EXPECTED_OPENMM_VERSION = "8.5.2"
 EXPECTED_OPENMM_GIT_REVISION = "36a30cbca54e727b216b606f3c011b67201eb8b4"
