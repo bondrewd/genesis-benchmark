@@ -1,7 +1,9 @@
 # Benchmarks
 
-Historical entries that use the system name `dhfr` refer to the current
-`dhfr_27k` dataset.
+Entries below that mention `dhfr_27k` or report 27,346 DHFR atoms describe an
+older benchmark dataset. The current native DHFR archive contains 23,558 atoms;
+its neutralized prepared system contains 23,536 atoms after replacing 11 waters
+with 11 sodium ions.
 
 ## 2026-07-08 19:18 JST - DHFR 4 fs benchmark-driver fix
 

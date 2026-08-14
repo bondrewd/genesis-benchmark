@@ -1,194 +1,261 @@
-# GENESIS GPU Benchmark
+# Multi-engine GPU MD benchmark inputs
 
-This repository contains input templates and Python scripts for benchmarking
-the GENESIS `spdyn` GPU molecular-dynamics implementation.
+This repository generates comparable GPU molecular-dynamics inputs for
+GENESIS, OpenMM, GROMACS, Amber, and NAMD. Each benchmark system keeps the
+single force field and water model supplied by its source archive. The
+generator does not reparameterize a system merely to make another engine
+available; unsupported engine/model combinations fail closed.
 
-The benchmark runs a matrix of systems, ensembles, and time steps. For each
-selected cell it can:
+## Physical models
 
-1. write a production input,
-2. run warmups,
-3. run repeated production measurements,
-4. save raw logs and a detailed CSV file.
+| System | Native model | Water |
+| --- | --- | --- |
+| DHFR | archive AMBER JAC | TIP3P |
+| ApoA1 | CHARMM27 protein/lipid | modified TIP3P |
+| UUN | CHARMM36 protein/lipid | modified TIP3P |
+| FactorIX | archive AMBER FactorIX model | TIP3P |
+| BPTI | Amber03 | TIP3P |
+| DPPC | CHARMM36 lipid | modified TIP3P |
+| AKE | archive AMBER model | TIP3P |
+| STMV | archive AMBER protein/RNA model | TIP3P |
+| Cellulose | archive AMBER carbohydrate model | TIP3P |
 
-## Requirements
+Every generated explicit-PME system is formally neutral. DHFR and ApoA1 are
+neutralized reproducibly by replacing native water molecules with native-family
+counterions. Already-neutral source systems are not compositionally changed.
 
-- Python 3.10 or newer
-- `mpirun`
-- a GENESIS `spdyn` executable
-- the compressed input archives in `data/*.tgz`
+## Protocol
 
-The command examples below assume you run them from this repository root.
+GENESIS inputs use the requested production controls:
 
-## Quick Start
+- VVER integration;
+- BUSSI thermostat and LANGEVIN barostat;
+- `thermostat_period`, `barostat_period`, and `baroscale_period` of 10 steps at
+  2 fs and 5 steps at 4 fs;
+- MSHAKE with `iter_solute = 2`, plus SETTLE for rigid water;
+- solute-only HMR at 4 fs, leaving rigid-water masses unchanged;
+- periodic center-of-mass motion removal disabled consistently across engines;
+- scalar reporting only during timed dynamics, with periodic trajectories and
+  restart checkpoints disabled;
+- 9/11 A cutoff/pair-list distance for AMBER-family models;
+- 12/14 A cutoff/pair-list distance for CHARMM-family models.
 
-Run one small benchmark:
+Other engines use the closest complete native implementation and record any
+non-equivalence directly in the generated input. In particular, GROMACS uses
+`md-vv`, v-rescale, C-rescale and LINCS; OpenMM uses CUDA
+LangevinMiddle/MonteCarloBarostat; Amber26 uses GPU `pmemd.cuda` with Bussi,
+SHAKE and its Monte Carlo barostat; NAMD uses stochastic velocity rescaling,
+Langevin piston, SHAKE and SETTLE. No CPU execution path is supported for the
+cross-engine comparison. Amber's Bussi implementation has a coupling-time
+control but no independent every-N thermostat application interval, so the
+requested 10/5-step cadence is recorded as provenance rather than mapped to a
+nonexistent Amber option. With `tau_t=5 ps`, Amber applies its coupled Bussi
+update every 2,500 steps at 2 fs and every 1,250 steps at 4 fs.
+
+All engines use a PME direct-space tolerance of `1e-5`. GENESIS retains the
+established per-system FFT grids; engines whose native setup selects grids from
+a target spacing retain that native grid policy.
+
+## Installed engines
+
+The local validated installations are expected at:
+
+```text
+GENESIS  ../genesis-mkl-private-gpu/src/spdyn_singlempi/spdyn
+OpenMM   /home/diego/miniforge3/envs/OpenMM
+GROMACS  /home/diego/gpu-development/gromacs-v2026.3-install/bin/gmx
+Amber    /home/diego/miniforge3/envs/Amber26-GPU/bin/pmemd.cuda
+NAMD     /home/diego/gpu-development/NAMD_3.0.3_Linux-x86_64-multicore-CUDA/namd3
+```
+
+The Amber environment is intentionally separate from the existing
+`AmberTools26` environment. CPU `sander` and QUICK QM/MM CUDA are not accepted
+as substitutes for classical GPU `pmemd.cuda`. Its wrapper selects the
+Release-26 SPFP binary installed under
+`/home/diego/gpu-development/amber/amber26-gpu`; that binary was built for
+CUDA 13.1 / `sm_120` and has SHA-256
+`31de7efa8680f5b138aced02d075a81efd8325783aeace63117af85c1cd4cf66`.
+GROMACS is the clean official `v2026.3` tag at commit
+`121090014570a53a17ea391bcddae45e5ea05eb4`.
+
+The installed NAMD 3.0.3 CUDA build is deliberately unavailable for STMV.
+Its CUDA tile-list kernel fails for this system, and Compute Sanitizer confirmed
+out-of-bounds global reads. The same native STMV model remains available in
+GENESIS, OpenMM, GROMACS, and Amber.
+Cellulose is supported by NAMD; its large-system launch uses the documented
+`+p8 +setcpuaffinity` route on one GPU.
+
+## Prepare native assets
+
+Source archives live in `data/<system>.tgz`. Asset preparation requires OpenMM
+and ParmEd but adds no runtime dependency to the generated inputs:
 
 ```bash
-python run_benchmark.py \
-  --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn \
+uv pip install \
+  --python /home/diego/miniforge3/envs/OpenMM/bin/python \
+  parmed==4.3.1
+
+conda run -n OpenMM python prepare_variants.py --list
+conda run -n OpenMM python prepare_variants.py --force
+```
+
+Prepared files are reproducible build products under ignored `data/variants/`
+directories. Their manifests pin source archives, input members, physical
+charges, HMR mass transfers, generated files, and validation results.
+
+## Generate inputs
+
+Show the current native-model support matrix:
+
+```bash
+python3 generate_inputs.py --list
+```
+
+Generate every supported input:
+
+```bash
+python3 generate_inputs.py
+```
+
+Inputs are separated by program:
+
+```text
+inputs/GENESIS/
+inputs/OPENMM/
+inputs/GROMACS/
+inputs/AMBER/
+inputs/NAMD/
+```
+
+Filenames are `system__ensemble__timestep.ext`; there is no force-field variant
+selector because each system has exactly one native model. Unsuffixed files are
+the closest GENESIS-matched execution profile. A distinct engine-native
+candidate adds `__native` before the extension.
+
+Only nonredundant profiles are emitted:
+
+| Engine | Generated execution profiles |
+| --- | --- |
+| GENESIS | matched reference |
+| OpenMM | native CUDA route; no built-in Bussi/Langevin-barostat match |
+| GROMACS | matched `md-vv`, plus native `md` candidate |
+| Amber | one matched route, which is also its native GPU route |
+| NAMD | matched route; distinct native Monte Carlo-pressure candidate for NPT |
+
+The `native` label denotes an engine-native/performance candidate, not a
+pre-measured winner. Performance conclusions require benchmarking both routes.
+
+Example customization:
+
+```bash
+python3 generate_inputs.py \
+  --systems dhfr,bpti \
+  --engines GENESIS,OPENMM,GROMACS,AMBER,NAMD \
+  --ensembles npt \
+  --dt 2,4 \
+  --nsteps 10000 \
+  --output-period 1000 \
+  --temperature 300 \
+  --pressure 1 \
+  --seed 314159 \
+  --pair-list-skin 2
+```
+
+Explicit engine selections fail if any requested engine cell lacks a fully
+validated native representation. Profile-only filters emit the profiles that
+exist across engines and report unsupported cells; a default unfiltered
+generation likewise skips unsupported cells and reports their count.
+
+## GPU execution
+
+Generated inputs contain the concrete topology and coordinate paths. These
+DHFR 4 fs examples show the required GPU launch forms; use the corresponding
+paths recorded in another system's input when changing systems.
+
+```bash
+flock -x /tmp/bench.lock \
+  mpirun -np 1 ../genesis-mkl-private-gpu/src/spdyn_singlempi/spdyn \
+  inputs/GENESIS/dhfr__npt__4fs.inp
+
+flock -x /tmp/bench.lock \
+  conda run -n OpenMM env GENESIS_BENCHMARK_ROOT="$PWD" \
+  python inputs/OPENMM/dhfr__npt__4fs__native.py
+
+flock -x /tmp/bench.lock bash -c '
+  gmx=/home/diego/gpu-development/gromacs-v2026.3-install/bin/gmx
+  "$gmx" grompp -maxwarn 1 \
+    -f inputs/GROMACS/dhfr__npt__4fs.mdp \
+    -c data/variants/dhfr/native_amber_jac_tip3p/system.g96 \
+    -p data/variants/dhfr/native_amber_jac_tip3p/system_hmr.top \
+    -po /tmp/dhfr-mdout.mdp \
+    -o /tmp/dhfr.tpr
+  "$gmx" mdrun -s /tmp/dhfr.tpr -deffnm /tmp/dhfr \
+    -ntmpi 1 -ntomp 1 -nb gpu -pme gpu -pmefft gpu -bonded gpu -update cpu \
+    -tunepme no -gpu_id 0 -noconfout -cpt -1
+'
+
+flock -x /tmp/bench.lock bash -c '
+  gmx=/home/diego/gpu-development/gromacs-v2026.3-install/bin/gmx
+  "$gmx" grompp -maxwarn 1 \
+    -f inputs/GROMACS/dhfr__npt__4fs__native.mdp \
+    -c data/variants/dhfr/native_amber_jac_tip3p/system.g96 \
+    -p data/variants/dhfr/native_amber_jac_tip3p/system_hmr.top \
+    -po /tmp/dhfr-native-mdout.mdp \
+    -o /tmp/dhfr-native.tpr
+  "$gmx" mdrun -s /tmp/dhfr-native.tpr -deffnm /tmp/dhfr-native \
+    -ntmpi 1 -ntomp 1 -nb gpu -pme gpu -pmefft gpu -bonded gpu \
+    -update gpu -gpu_id 0 -noconfout -cpt -1
+'
+
+flock -x /tmp/bench.lock \
+  conda run -n Amber26-GPU pmemd.cuda -O \
+  -i inputs/AMBER/dhfr__npt__4fs.in \
+  -p data/variants/dhfr/native_amber_jac_tip3p/system_hmr.prmtop \
+  -c data/variants/dhfr/native_amber_jac_tip3p/system.inpcrd \
+  -o /tmp/dhfr.mdout -r /tmp/dhfr.restrt
+
+flock -x /tmp/bench.lock \
+  /home/diego/gpu-development/NAMD_3.0.3_Linux-x86_64-multicore-CUDA/namd3 \
+  +p1 +devices 0 inputs/NAMD/dhfr__npt__4fs.namd
+
+# NAMD's distinct native NPT candidate uses Monte Carlo pressure control.
+flock -x /tmp/bench.lock \
+  /home/diego/gpu-development/NAMD_3.0.3_Linux-x86_64-multicore-CUDA/namd3 \
+  +p1 +devices 0 inputs/NAMD/dhfr__npt__4fs__native.namd
+```
+
+GROMACS 2026.3 does not support GPU update/constraint offload with `md-vv`, so
+the matched profile keeps its update stage on the CPU while nonbonded, PME, and
+supported bonded work are explicitly offloaded. The separately labeled native
+profile uses `md`, engine-managed coupling/buffering, and GPU update so the
+performance/algorithm tradeoff can be measured rather than assumed. For native
+NVE, the generated Verlet-buffer tolerance is capped by temperature and run
+duration so GROMACS's estimated accumulated drift remains at or below 1%.
+The single allowed `grompp` warning is the expected notice that periodic
+center-of-mass removal is deliberately disabled; automation rejects any other
+warning or a different warning count.
+
+The GENESIS benchmark driver additionally rejects logs that do not prove the
+real-space, reciprocal-space, pair-list, and nonbonded GPU routes.
+
+## GENESIS measurements
+
+`run_benchmark.py` remains the focused GENESIS GPU measurement driver. It reads
+only `inputs/GENESIS`, verifies immutable scientific controls against a fresh
+canonical render, serializes GPU access through `/tmp/bench.lock`, and retains
+raw logs plus CSV results.
+
+```bash
+python3 run_benchmark.py \
+  --spdyn ../genesis-mkl-private-gpu/src/spdyn_singlempi/spdyn \
   --systems dhfr \
-  --ensembles nve \
-  --dt 2 \
+  --ensembles npt \
+  --dt 4 \
   --warmup 1 \
-  --measure 3
+  --measure 5
 ```
 
-Run the default benchmark matrix:
-
-```bash
-python run_benchmark.py --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn
-```
-
-The default run uses:
-
-- all systems: `dhfr,apoa1,uun,factorix,bpti,dppc,ake,stmv,cellulose`
-- all ensembles: `nve,nvt,npt`
-- both time steps: `2fs,4fs` for every system
-- `100000` production steps
-- `eneout_period = 1000`
-- `1` MPI process
-- `1` OpenMP thread
-
-## Common Examples
-
-Run the 23,558-atom AMBER JAC/DHFR NVE benchmark at both time steps:
-
-```bash
-python run_benchmark.py \
-  --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn \
-  --systems dhfr \
-  --ensembles nve \
-  --dt 2,4
-```
-
-Run DHFR and cellulose:
-
-```bash
-python run_benchmark.py \
-  --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn \
-  --systems dhfr,cellulose \
-  --ensembles nve \
-  --dt 2
-```
-
-Use shorter runs for a smoke test:
-
-```bash
-python run_benchmark.py \
-  --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn \
-  --systems dhfr \
-  --ensembles nve \
-  --dt 2 \
-  --warmup 0 \
-  --measure 1 \
-  --nsteps 1000
-```
-
-Set MPI and OpenMP parallelism:
-
-```bash
-python run_benchmark.py \
-  --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn \
-  --systems dhfr \
-  --mpi-procs 1 \
-  --omp-threads 1
-```
-
-Override the energy-output period:
-
-```bash
-python run_benchmark.py \
-  --spdyn ../genesis-mkl-private/src/spdyn_singlempi/spdyn \
-  --systems dhfr \
-  --nsteps 20000 \
-  --eneout-period 1000
-```
-
-`--nsteps` must be an exact multiple of `--eneout-period`.
-
-## Output
-
-Each benchmark creates:
-
-```text
-results/<timestamp>.csv
-results/<timestamp>/
-  benchmark.log
-  summary.log
-  inputs/
-  production/
-```
-
-`benchmark.log` contains the full progress log.
-
-`summary.log` contains only the final table:
-
-```text
-=== ns/day (mean/median +- std, cv%) : measure=10, nsteps=100000 ===
-system     ens   dt           mean       median      +-std     cv%  note
-----------------------------------------------------------------------------------
-```
-
-The CSV contains one row per measured production run. It includes the run ID,
-the performance value, aggregate statistics, atom count, input options, and
-paths to the raw GENESIS logs.
-
-## Input Data
-
-The repository stores input data as compressed archives:
-
-```text
-data/<system>.tgz
-```
-
-When a selected system is missing from `data/<system>/`, the benchmark extracts
-the archive automatically while holding the benchmark lock.
-
-The extracted directories and benchmark outputs are generated files and are not
-committed:
-
-```text
-data/<system>/
-results/
-```
-
-## Regenerate Inputs
-
-The checked-in input files live in `inputs/`. Regenerate them with:
-
-```bash
-python generate_inputs.py
-```
-
-The generated input matrix covers 54 benchmark cells:
-
-- systems: `dhfr, apoa1, uun, factorix, bpti, dppc, ake, stmv, cellulose`
-- ensembles: `nve, nvt, npt`
-- time steps: `2fs, 4fs` for every system
-
-## Notes
-
-- Benchmark runs are serialized with an advisory lock at `/tmp/bench.lock`.
-- The lock file may remain on disk; only a live process holding the lock blocks
-  another benchmark.
-- The benchmark driver does not run a separate autotuning pass or add a
-  `[GPU]` block to generated run inputs.
-- `dhfr` is the standard AMBER JAC PME benchmark system with 23,558 atoms. The
-  current AMBER suite publishes it as `PME/Topologies/JAC.prmtop` and
-  `PME/Coordinates/JAC.inpcrd` in the
-  [AMBER20 benchmark suite](https://ambermd.org/Amber20_Benchmark_Suite.tar.gz).
-  `data/dhfr.tgz` retains the normal-mass, GENESIS-compatible conversion used
-  for the 2 fs input; the 4 fs input applies GENESIS runtime HMR.
-- Every rigid system explicitly selects `cons_scheme = MSHAKE-SETTLE`, using
-  `iter_solute = 2` for the solute and SETTLE for water without an
-  `iter_water` setting.
-- Every topology uses normal 1.008 amu hydrogen masses. The 2 fs inputs retain
-  those masses, while every 4 fs input enables GENESIS runtime HMR with
-  `hmr_target = all`, `hmr_ratio = 3.0`, and
-  `hydrogen_mass_upper_bound = 3.3`.
-- FactorIX does not load its legacy MD restart because that file contains
-  velocities generated for the former pre-HMR topology. GENESIS instead
-  initializes velocities after selecting the active 2 fs or 4 fs masses.
-- `data/stmv.tgz` is compressed so no single tracked file is larger than
-  GitHub's 100 MB file limit.
+Short acceptance runs are not performance measurements: one 10,000-step GPU
+run is used per advertised engine/system/execution-profile combination, reduced
+to 1,000 steps for Cellulose and STMV. Repeated warmups and retained samples are
+required only when reporting comparative performance.
